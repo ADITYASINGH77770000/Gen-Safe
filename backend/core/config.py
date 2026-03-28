@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     # Escalation / workflow automation
     TASK_ESCALATION_HOURS: int = 24
     NOTIFICATION_WEBHOOK_URL: Optional[str] = None
+    ENABLE_BACKGROUND_MAINTENANCE: bool = True
+    HEALTH_MONITOR_INTERVAL_SECONDS: int = 300
+    ESCALATION_SWEEP_INTERVAL_SECONDS: int = 900
+    AUDIT_RETENTION_SWEEP_SECONDS: int = 86400
+    BASELINE_REFRESH_INTERVAL_SECONDS: int = 86400
 
     # Audit retention / integrity
     AUDIT_RETENTION_DAYS: int = 365

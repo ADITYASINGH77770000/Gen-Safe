@@ -38,6 +38,7 @@ export const invoiceApi = {
   getResult: (jobId) => api.get(`/api/v1/invoice/${jobId}/result`),
   list: (params) => api.get('/api/v1/invoice/list', { params }),
   get: (id) => api.get(`/api/v1/invoice/${id}`),
+  agents: (id) => api.get(`/api/v1/invoice/${id}/agents`),
 };
 
 export const alertApi = {
@@ -69,6 +70,7 @@ export const auditApi = {
   stats: () => api.get('/api/v1/audit/stats'),
   integrity: (params) => api.get('/api/v1/audit/integrity', { params }),
   retention: (params) => api.get('/api/v1/audit/retention', { params }),
+  exportAndPurge: (params) => api.post('/api/v1/audit/export-and-purge', null, { params }),
 };
 
 export const webhookApi = {
@@ -83,7 +85,21 @@ export const opsApi = {
   ocrStatus: () => api.get('/api/v1/ops/ocr-status'),
   ocrTest: () => api.get('/api/v1/ops/ocr-test'),
   runEscalations: () => api.post('/api/v1/ops/run-escalations'),
+  runMaintenance: (refreshBaselines = false) => api.post('/api/v1/ops/run-maintenance', null, {
+    params: refreshBaselines ? { refresh_baselines: true } : {},
+  }),
   traceMessages: (traceId, limit = 200) => api.get(`/api/v1/ops/trace/${traceId}/messages`, { params: { limit } }),
+};
+
+export const healthApi = {
+  check: () => api.get('/api/v1/health/check'),
+  stats: () => api.get('/api/v1/health/pipeline-stats'),
+};
+
+export const selfCorrectApi = {
+  computeBaselines: (supplierId) => api.post('/api/v1/selfcorrect/compute-baselines', null, {
+    params: supplierId ? { supplier_id: supplierId } : {},
+  }),
 };
 
 export const integrationApi = {

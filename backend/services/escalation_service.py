@@ -67,10 +67,10 @@ class EscalationService:
         result = await self.db.execute(
             text(
                 """
-                SELECT job_id, invoice_id, current_step, created_at
+                SELECT job_id, invoice_id, current_step, started_at, created_at
                 FROM processing_jobs
                 WHERE status='processing'
-                  AND created_at < :cutoff
+                  AND COALESCE(started_at, created_at) < :cutoff
                 """
             ),
             {"cutoff": cutoff},
@@ -84,6 +84,7 @@ class EscalationService:
                     "job_id": row["job_id"],
                     "invoice_id": row.get("invoice_id"),
                     "current_step": row.get("current_step"),
+                    "started_at": str(row.get("started_at") or row.get("created_at")),
                     "created_at": str(row.get("created_at")),
                 },
             )

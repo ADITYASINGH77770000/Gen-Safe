@@ -9,6 +9,7 @@ import Suppliers from './pages/Suppliers';
 import Tasks from './pages/Tasks';
 import AuditTrail from './pages/AuditTrail';
 import OpsCenter from './pages/OpsCenter';
+import HealthMonitor from './pages/HealthMonitor';
 import Layout from './components/common/Layout';
 
 function PrivateRoute({ children }) {
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="tasks" element={<Tasks />} />
           <Route path="audit" element={<AuditTrail />} />
           <Route path="ops-center" element={<OpsCenter />} />
+          <Route path="health" element={<HealthMonitor />} />
         </Route>
       </Routes>
     </BrowserRouter>

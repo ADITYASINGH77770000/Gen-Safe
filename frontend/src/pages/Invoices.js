@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import { Upload, FileText, Clock, CheckCircle, XCircle, AlertTriangle, RefreshCw, ScanSearch, Image as ImageIcon } from 'lucide-react';
 import { invoiceApi, supplierApi, opsApi } from '../services/api';
 import { useNavigate } from 'react-router-dom';
@@ -151,7 +151,7 @@ export default function Invoices() {
           </h3>
           <span style={pillStyle}>
             <ScanSearch size={11} />
-            {ocrReady ? `OCR Ready${ocrStatus?.version ? ` � ${ocrStatus.version}` : ''}` : 'OCR Missing'}
+            {ocrReady ? `OCR Ready${ocrStatus?.version ? ` · ${ocrStatus.version}` : ''}` : 'OCR Missing'}
           </span>
         </div>
 
@@ -227,6 +227,33 @@ export default function Invoices() {
             <pre style={{ margin:0, whiteSpace:'pre-wrap', wordBreak:'break-word', color:'#cbd5e1', fontSize:12, lineHeight:1.6, maxHeight:180, overflow:'auto' }}>
               {analysisResult.extracted_text_preview}
             </pre>
+          </div>
+        )}
+
+        {analysisResult?.ocr_fields && (
+          <div style={{ marginTop:12, padding:14, background:'rgba(15,23,42,0.85)', border:'1px solid #243046', borderRadius:10 }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, marginBottom:10 }}>
+              <strong style={{ color:'#e2e8f0', fontSize:13 }}>OCR Parsed Fields</strong>
+              <span style={{ fontSize:11, color:'#94a3b8' }}>
+                Confidence {Math.round((analysisResult.ocr_fields.confidence || 0) * 100)}%
+              </span>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))', gap:10 }}>
+              {[
+                ['invoice_number', analysisResult.ocr_fields.invoice_number],
+                ['supplier_name', analysisResult.ocr_fields.supplier_name],
+                ['currency', analysisResult.ocr_fields.currency],
+                ['total_amount', analysisResult.ocr_fields.total_amount],
+                ['subtotal', analysisResult.ocr_fields.subtotal],
+                ['tax', analysisResult.ocr_fields.tax],
+                ['discount', analysisResult.ocr_fields.discount],
+              ].map(([label, value]) => (
+                <div key={label} style={{ padding:'10px 12px', background:'#1a1a2e', borderRadius:8, border:'1px solid #2d2d44' }}>
+                  <div style={{ fontSize:11, color:'#6b7280', textTransform:'uppercase', letterSpacing:0.5, marginBottom:4 }}>{label}</div>
+                  <div style={{ fontSize:13, color:'#e2e8f0', wordBreak:'break-word' }}>{value != null && value !== '' ? String(value) : 'n/a'}</div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -307,3 +334,4 @@ export default function Invoices() {
     </div>
   );
 }
+

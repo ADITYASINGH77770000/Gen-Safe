@@ -1,4 +1,5 @@
 """All API routes — auth, invoices, alerts, suppliers, dashboard, tasks, audit, webhooks"""
+import asyncio
 import uuid, json
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
@@ -10,9 +11,9 @@ from typing import Optional, Any
 import structlog
 
 from core.config import settings
-from core.database import get_db
+from core.database import get_db, AsyncSessionLocal
 from core.auth import verify_password, create_token, get_current_user
-from services.document_processor import process_document, save_file_with_metadata
+from services.document_processor import process_document, save_file_with_metadata, parse_invoice_fields
 from services.gemini_service import extract_meeting_items
 from services.workflow_health import WorkflowHealthService
 from services.job_dispatcher import dispatch_invoice_job
@@ -20,12 +21,16 @@ from services.escalation_service import EscalationService
 from services.agent_bus import AgentBus
 from services.erp_oauth_service import ERPOAuthService
 from services.audit_maintenance import AuditMaintenanceService
+from services.agents.health_monitor import WorkflowHealthMonitor
+from services.agents.self_correction_agent import SelfCorrectionAgent
 
 logger = structlog.get_logger()
 
 # â”€â”€ OPS / HEALTH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ops_router = APIRouter()
 integration_router = APIRouter()
+health_router = APIRouter()
+selfcorrect_router = APIRouter()
 
 
 class IntegrationConfigIn(BaseModel):
@@ -166,6 +171,59 @@ async def run_escalations(db: AsyncSession = Depends(get_db), current_user: dict
     result = await service.run()
     return {"message": "Escalation run completed", **result}
 
+
+@ops_router.post("/run-maintenance")
+async def run_maintenance(
+    refresh_baselines: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    result = await _run_maintenance_sweep(db, refresh_baselines=refresh_baselines)
+    return {"message": "Maintenance sweep completed", **result}
+
+
+@health_router.get("/check")
+async def health_check(db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    monitor = WorkflowHealthMonitor(db)
+    return await monitor.run_health_check()
+
+
+@health_router.get("/pipeline-stats")
+async def pipeline_stats(db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    monitor = WorkflowHealthMonitor(db)
+    return (await monitor.run_health_check()).get("stats", {})
+
+
+@selfcorrect_router.post("/compute-baselines")
+async def compute_baselines(
+    supplier_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    agent = SelfCorrectionAgent(db)
+    return await agent.compute_supplier_baselines(supplier_id)
+
+
+async def _run_self_correction(alert_id: str, was_correct: bool, analyst_note: Optional[str] = None):
+    async with AsyncSessionLocal() as db:
+        agent = SelfCorrectionAgent(db)
+        await agent.process_feedback(alert_id, was_correct, analyst_note)
+
+
+async def _run_maintenance_sweep(db: AsyncSession, refresh_baselines: bool = False) -> dict:
+    health = await WorkflowHealthMonitor(db).run_health_check()
+    escalations = await EscalationService(db).run()
+    retention = await AuditMaintenanceService(db).retention_preview()
+    baselines = None
+    if refresh_baselines:
+        baselines = await SelfCorrectionAgent(db).compute_supplier_baselines()
+    return {
+        "health": health,
+        "escalations": escalations,
+        "retention": retention,
+        "baselines": baselines,
+    }
+
 @ops_router.get("/trace/{trace_id}/messages")
 async def get_trace_messages(
     trace_id: str,
@@ -290,6 +348,34 @@ async def me(current_user: dict = Depends(get_current_user)):
 # ── INVOICES ──────────────────────────────────────────────────
 invoice_router = APIRouter()
 
+
+async def _resolve_supplier_id(db: AsyncSession, supplier_name: Optional[str], currency: str = "USD") -> Optional[str]:
+    if not supplier_name:
+        return None
+    normalized = supplier_name.strip()
+    if not normalized:
+        return None
+
+    existing = await db.execute(
+        text("SELECT supplier_id FROM suppliers WHERE LOWER(name) = LOWER(:name) LIMIT 1"),
+        {"name": normalized},
+    )
+    row = existing.mappings().first()
+    if row:
+        return str(row["supplier_id"])
+
+    supplier_id = str(uuid.uuid4())
+    await db.execute(
+        text(
+            """
+            INSERT INTO suppliers (supplier_id, name, currency, risk_level, created_at)
+            VALUES (:id, :name, :currency, 'unknown', CURRENT_TIMESTAMP)
+            """
+        ),
+        {"id": supplier_id, "name": normalized, "currency": currency or "USD"},
+    )
+    return supplier_id
+
 @invoice_router.post("/analyze")
 async def submit_invoice(
     background_tasks: BackgroundTasks,
@@ -307,14 +393,33 @@ async def submit_invoice(
     file_meta = save_file_with_metadata(content, file.filename)
     file_path = file_meta["local_path"]
     doc = await process_document(file_path, file.filename)
+    parsed = doc.get("fields", {}) or {}
+
+    parsed_supplier_name = parsed.get("supplier_name")
+    parsed_invoice_number = parsed.get("invoice_number")
+    parsed_currency = parsed.get("currency") or currency or "USD"
+    parsed_amount = parsed.get("total_amount")
+    chosen_amount = amount if amount not in (None, "", 0) else parsed_amount or 0
+    chosen_invoice_number = invoice_number or parsed_invoice_number or f"INV-{invoice_id[:8].upper()}"
+    chosen_supplier_id = supplier_id or await _resolve_supplier_id(db, parsed_supplier_name, parsed_currency)
+
+    if chosen_amount in ("", None):
+        chosen_amount = 0
+    try:
+        chosen_amount = float(chosen_amount or 0)
+    except Exception:
+        chosen_amount = 0.0
+
+    if not supplier_id and chosen_supplier_id:
+        supplier_id = chosen_supplier_id
 
     await db.execute(text("""
         INSERT INTO invoices (invoice_id, supplier_id, invoice_number, amount, currency,
             local_file_path, document_url, extracted_text, status, processing_job_id, created_at)
         VALUES (:id, :sid, :num, :amt, :cur, :path, :doc_url, :text, 'pending', :job, CURRENT_TIMESTAMP)
-    """), {"id": invoice_id, "sid": supplier_id,
-           "num": invoice_number or f"INV-{invoice_id[:8].upper()}",
-           "amt": amount or 0, "cur": currency,
+    """), {"id": invoice_id, "sid": chosen_supplier_id or supplier_id,
+           "num": chosen_invoice_number,
+           "amt": chosen_amount, "cur": parsed_currency,
            "path": file_path, "doc_url": file_meta.get("document_url"), "text": doc["text"], "job": job_id})
 
     await db.execute(text("""
@@ -324,7 +429,17 @@ async def submit_invoice(
     await db.commit()
 
     dispatch_invoice_job(background_tasks, invoice_id, job_id)
-    return {"message": "Invoice submitted", "invoice_id": invoice_id, "job_id": job_id, "status": "queued"}
+    return {
+        "message": "Invoice submitted",
+        "invoice_id": invoice_id,
+        "job_id": job_id,
+        "status": "queued",
+        "ocr_fields": parsed,
+        "invoice_number": chosen_invoice_number,
+        "amount": chosen_amount,
+        "currency": parsed_currency,
+        "supplier_id": supplier_id,
+    }
 
 @invoice_router.get("/list")
 async def list_invoices(skip: int = 0, limit: int = 50, status: Optional[str] = None,
@@ -353,10 +468,55 @@ async def get_result(job_id: str, db: AsyncSession = Depends(get_db), current_us
             if extracted_text:
                 result["extracted_text_preview"] = extracted_text[:2000]
                 result["extracted_text_length"] = len(extracted_text)
+                result["ocr_fields"] = parse_invoice_fields(extracted_text)
+        elif result.get("extracted_text_preview"):
+            result["ocr_fields"] = parse_invoice_fields(result.get("extracted_text_preview", ""))
         resp["result"] = result
     if job["status"] == "failed":
         resp["error"] = job["error_message"]
     return resp
+
+
+@invoice_router.get("/{invoice_id}/agents")
+async def get_invoice_agent_breakdown(
+    invoice_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    result = await db.execute(
+        text(
+            """
+            SELECT result
+            FROM processing_jobs
+            WHERE invoice_id = :id AND status = 'completed'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ),
+        {"id": invoice_id},
+    )
+    row = result.mappings().first()
+    if not row or not row["result"]:
+        raise HTTPException(404, "No completed analysis found")
+
+    analysis = json.loads(row["result"]) if isinstance(row["result"], str) else row["result"]
+    return {
+        "invoice_id": invoice_id,
+        "risk_score": analysis.get("risk_score"),
+        "decision": analysis.get("decision"),
+        "agents": {
+            "llm": analysis.get("llm_analysis"),
+            "anomaly": analysis.get("anomaly_analysis"),
+            "cv": analysis.get("cv_analysis"),
+            "multilingual": analysis.get("multilingual_analysis"),
+            "fraud_simulation": analysis.get("fraud_simulation_analysis"),
+            "verification": analysis.get("verification"),
+        },
+        "acp_messages": analysis.get("acp_messages", 0),
+        "pipeline_steps": analysis.get("pipeline_steps", []),
+        "errors": analysis.get("errors", []),
+        "trace_id": analysis.get("trace_id"),
+    }
 
 @invoice_router.get("/{invoice_id}")
 async def get_invoice(invoice_id: str, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
@@ -376,6 +536,20 @@ async def get_invoice(invoice_id: str, db: AsyncSession = Depends(get_db), curre
             try: a["flags"] = json.loads(a["flags"])
             except: pass
         inv["alert"] = a
+    extracted_text = inv.get("extracted_text") or ""
+    if extracted_text:
+        ocr_fields = parse_invoice_fields(extracted_text)
+        inv["ocr_fields"] = ocr_fields
+        inv["extracted_text_preview"] = extracted_text[:2000]
+        inv["extracted_text_length"] = len(extracted_text)
+        if ocr_fields.get("invoice_number") and (not inv.get("invoice_number") or str(inv.get("invoice_number")).startswith("INV-")):
+            inv["invoice_number"] = ocr_fields["invoice_number"]
+        if ocr_fields.get("supplier_name") and (not inv.get("supplier_name") or str(inv.get("supplier_name")).lower() == "unknown"):
+            inv["supplier_name"] = ocr_fields["supplier_name"]
+        if ocr_fields.get("total_amount") not in (None, "") and float(inv.get("amount") or 0) == 0:
+            inv["amount"] = ocr_fields["total_amount"]
+        if ocr_fields.get("currency") and not inv.get("currency"):
+            inv["currency"] = ocr_fields["currency"]
     return inv
 
 # ── ALERTS ────────────────────────────────────────────────────
@@ -409,7 +583,7 @@ async def list_alerts(status: Optional[str] = None, limit: int = 50, skip: int =
 @alert_router.get("/{alert_id}")
 async def get_alert(alert_id: str, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
     r = await db.execute(text("""
-        SELECT fa.*, s.name as supplier_name, i.invoice_number, i.amount, i.currency
+        SELECT fa.*, s.name as supplier_name, i.invoice_number, i.amount, i.currency, i.extracted_text
         FROM fraud_alerts fa
         LEFT JOIN suppliers s ON fa.supplier_id=s.supplier_id
         LEFT JOIN invoices i ON fa.invoice_id=i.invoice_id
@@ -421,6 +595,20 @@ async def get_alert(alert_id: str, db: AsyncSession = Depends(get_db), current_u
     if isinstance(a.get("flags"), str):
         try: a["flags"] = json.loads(a["flags"])
         except: pass
+    extracted_text = a.get("extracted_text") or ""
+    if extracted_text:
+        ocr_fields = parse_invoice_fields(extracted_text)
+        a["ocr_fields"] = ocr_fields
+        a["extracted_text_preview"] = extracted_text[:2000]
+        a["extracted_text_length"] = len(extracted_text)
+        if ocr_fields.get("invoice_number") and (not a.get("invoice_number") or str(a.get("invoice_number")).startswith("INV-")):
+            a["invoice_number"] = ocr_fields["invoice_number"]
+        if ocr_fields.get("supplier_name") and (not a.get("supplier_name") or str(a.get("supplier_name")).lower() == "unknown"):
+            a["supplier_name"] = ocr_fields["supplier_name"]
+        if ocr_fields.get("total_amount") not in (None, "") and float(a.get("amount") or 0) == 0:
+            a["amount"] = ocr_fields["total_amount"]
+        if ocr_fields.get("currency") and not a.get("currency"):
+            a["currency"] = ocr_fields["currency"]
     return a
 
 @alert_router.post("/{alert_id}/feedback")
@@ -438,6 +626,10 @@ async def feedback(alert_id: str, data: FeedbackIn,
     await db.execute(text("UPDATE fraud_alerts SET status=:s, resolved_at=CURRENT_TIMESTAMP WHERE alert_id=:id"),
                      {"s": new_status, "id": alert_id})
     await db.commit()
+    try:
+        asyncio.create_task(_run_self_correction(alert_id, data.was_correct, data.analyst_note))
+    except Exception as e:
+        logger.warning("Self-correction agent error", error=str(e))
     return {"message": "Feedback recorded", "new_status": new_status}
 
 @alert_router.patch("/{alert_id}/resolve")
@@ -665,6 +857,17 @@ async def audit_retention(
 ):
     service = AuditMaintenanceService(db)
     return await service.retention_preview(retention_days=retention_days)
+
+
+@audit_router.post("/export-and-purge")
+async def audit_export_and_purge(
+    retention_days: Optional[int] = None,
+    archive_dir: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    service = AuditMaintenanceService(db)
+    return await service.export_and_purge(retention_days=retention_days, archive_dir=archive_dir)
 
 # ── WEBHOOKS ──────────────────────────────────────────────────
 webhook_router = APIRouter()

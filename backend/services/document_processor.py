@@ -2,6 +2,7 @@
 import os
 import shutil
 import uuid
+import re
 from pathlib import Path
 
 import pytesseract
@@ -61,6 +62,7 @@ async def process_document(file_path: str, filename: str) -> dict:
     ext = Path(filename).suffix.lower()
     text = ""
     logger.info("Document processing started", filename=filename, extension=ext)
+    fields = {}
     try:
         if ext == ".pdf":
             text = await _extract_pdf(file_path)
@@ -71,12 +73,13 @@ async def process_document(file_path: str, filename: str) -> dict:
                 text = f.read()
         else:
             text = f"[Unsupported format: {ext}]"
+        fields = parse_invoice_fields(text)
         if not text.strip():
             text = f"[No text extracted from {filename}]"
     except Exception as e:
         logger.error("Document processing failed", error=str(e))
         text = f"[Extraction failed: {e}]"
-    return {"text": text[:10000], "filename": filename}
+    return {"text": text[:10000], "filename": filename, "fields": fields}
 
 
 async def _extract_pdf(path: str) -> str:
@@ -148,3 +151,149 @@ def save_file_with_metadata(content: bytes, filename: str) -> dict:
     object_name = Path(local_path).name
     document_url = object_storage.archive_file(local_path, object_name)
     return {"local_path": local_path, "document_url": document_url}
+
+
+def parse_invoice_fields(text: str) -> dict:
+    """Best-effort OCR parser for common invoice fields."""
+    raw = text or ""
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    compact = " ".join(lines)
+    fields: dict[str, object] = {}
+
+    invoice_number = _match_first(
+        raw,
+        [
+            r"(?:invoice\s*(?:id|no|number|#)|inv\s*(?:id|no|#)?)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\/._\-]{2,})",
+            r"invoice\s*[:\-]?\s*([A-Z0-9][A-Z0-9\/._\-]{2,})",
+        ],
+    )
+    if invoice_number:
+        fields["invoice_number"] = invoice_number
+
+    supplier_name = _infer_supplier_name(lines)
+    if supplier_name:
+        fields["supplier_name"] = supplier_name
+
+    parsed_amount = _match_first(
+        raw,
+        [
+            r"(?:grand\s+total|invoice\s+total|amount\s+due|total)\s*(?:\(([A-Z]{3})\))?\s*[:\-]?\s*([€$£₹])?\s*([0-9][0-9,]*\.?[0-9]{0,2})",
+            r"(?:grand\s+total|invoice\s+total|amount\s+due|total)\s*[:\-]?\s*([0-9][0-9,]*\.?[0-9]{0,2})\s*(?:([A-Z]{3}))?",
+        ],
+        amount=True,
+    )
+    if parsed_amount:
+        fields["total_amount"] = parsed_amount["amount"]
+        if parsed_amount.get("currency"):
+            fields["currency"] = parsed_amount["currency"]
+
+    if "currency" not in fields:
+        currency = _infer_currency(compact)
+        if currency:
+            fields["currency"] = currency
+
+    subtotal = _match_first(
+        raw,
+        [r"sub\s*total\s*(?:\(([A-Z]{3})\))?\s*[:\-]?\s*([€$£₹])?\s*([0-9][0-9,]*\.?[0-9]{0,2})"],
+        amount=True,
+    )
+    if subtotal:
+        fields["subtotal"] = subtotal["amount"]
+
+    tax = _match_first(
+        raw,
+        [r"tax\s*(?:\(([0-9]+(?:\.[0-9]+)?%)\))?\s*[:\-]?\s*([€$£₹])?\s*([0-9][0-9,]*\.?[0-9]{0,2})"],
+        amount=True,
+    )
+    if tax:
+        fields["tax"] = tax["amount"]
+
+    discount = _match_first(
+        raw,
+        [r"discount\s*(?:\(([0-9]+(?:\.[0-9]+)?%)\))?\s*[:\-]?\s*([€$£₹])?\s*([0-9][0-9,]*\.?[0-9]{0,2})"],
+        amount=True,
+    )
+    if discount:
+        fields["discount"] = discount["amount"]
+
+    if "total_amount" not in fields and any(key in fields for key in ("subtotal", "tax", "discount")):
+        subtotal_val = float(fields.get("subtotal") or 0)
+        tax_val = float(fields.get("tax") or 0)
+        discount_val = float(fields.get("discount") or 0)
+        if subtotal_val or tax_val or discount_val:
+            fields["total_amount"] = round(subtotal_val + tax_val - discount_val, 2)
+
+    coverage = sum(1 for key in ("invoice_number", "supplier_name", "total_amount") if key in fields)
+    fields["confidence"] = round(coverage / 3, 2)
+    return fields
+
+
+def _infer_currency(text: str) -> str | None:
+    for currency in ("EUR", "USD", "GBP", "INR", "JPY", "AED", "CAD", "AUD", "CHF"):
+        if re.search(rf"\b{currency}\b", text, re.IGNORECASE):
+            return currency
+    return None
+
+
+def _infer_supplier_name(lines: list[str]) -> str | None:
+    skip_words = {
+        "invoice",
+        "tax id",
+        "tax",
+        "phone",
+        "fax",
+        "bill to",
+        "bill",
+        "ship to",
+        "customer",
+        "date",
+        "total",
+        "subtotal",
+        "discount",
+        "amount",
+        "description",
+        "qty",
+        "units",
+        "unit price",
+    }
+    for line in lines[:12]:
+        clean = re.sub(r"\s+", " ", line).strip(" :-\t")
+        if not clean:
+            continue
+        lower = clean.lower()
+        if any(word in lower for word in skip_words):
+            continue
+        if len(clean) > 60:
+            continue
+        if re.fullmatch(r"[A-Z0-9][A-Z0-9&.,'()/\- ]{2,}", clean, re.IGNORECASE):
+            return clean
+    return None
+
+
+def _match_first(text: str, patterns: list[str], amount: bool = False):
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+        if not match:
+            continue
+        if amount:
+            currency = None
+            for group in match.groups():
+                if not group:
+                    continue
+                group = str(group).strip()
+                if re.fullmatch(r"[A-Z]{3}", group):
+                    currency = group.upper()
+                    continue
+                if group in {"$", "€", "£", "₹"}:
+                    currency = {"$": "USD", "€": "EUR", "£": "GBP", "₹": "INR"}[group]
+                    continue
+                try:
+                    amount_value = float(group.replace(",", ""))
+                    return {"amount": round(amount_value, 2), "currency": currency}
+                except ValueError:
+                    continue
+        else:
+            for group in match.groups():
+                if group:
+                    return group.strip()
+    return None

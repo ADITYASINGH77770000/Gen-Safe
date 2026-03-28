@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, CheckCircle, XCircle, AlertTriangle, Shield, Brain, Activity } from 'lucide-react';
-import { alertApi } from '../services/api';
+import { ArrowLeft, CheckCircle, XCircle, AlertTriangle, Shield, Brain, Activity, ScanSearch } from 'lucide-react';
+import { alertApi, invoiceApi } from '../services/api';
 
 const card = (extra={}) => ({ background:'#12121a', border:'1px solid #1e1e2e', borderRadius:12, padding:20, ...extra });
 const RISK_COLORS = { critical:'#ef4444', high:'#f97316', medium:'#eab308', low:'#22c55e' };
@@ -15,10 +15,37 @@ export default function AlertDetail() {
   const [submitting, setSubmitting] = useState(false);
   const [note, setNote] = useState('');
   const [done, setDone] = useState('');
+  const [agentBreakdown, setAgentBreakdown] = useState(null);
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [agentError, setAgentError] = useState('');
 
   useEffect(() => {
     alertApi.get(id).then(r => setAlert(r.data)).catch(console.error).finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    const invoiceId = alert?.invoice_id;
+    if (!invoiceId) return;
+
+    let active = true;
+    setAgentLoading(true);
+    setAgentError('');
+
+    invoiceApi.agents(invoiceId)
+      .then((r) => {
+        if (active) setAgentBreakdown(r.data);
+      })
+      .catch((err) => {
+        if (active) setAgentError(err.response?.data?.detail || 'Unable to load agent breakdown.');
+      })
+      .finally(() => {
+        if (active) setAgentLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [alert?.invoice_id]);
 
   const submitFeedback = async (wasCorrect) => {
     setSubmitting(true);
@@ -75,6 +102,98 @@ export default function AlertDetail() {
               <p style={{ fontSize:12, color:'#a78bfa', fontWeight:600, marginBottom:2 }}>RECOMMENDED ACTION</p>
               <p style={{ fontSize:13, color:'#d1d5db' }}>{alert.recommended_action}</p>
             </div>
+          )}
+        </div>
+
+        {(alert.ocr_fields || alert.extracted_text_preview) && (
+          <div style={{ ...card(), gridColumn:'1/-1' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+              <ScanSearch size={16} color="#38bdf8" />
+              <h3 style={{ fontSize:14, fontWeight:600, color:'#e2e8f0' }}>OCR Parsed Fields</h3>
+              {alert.ocr_fields?.confidence != null && (
+                <span style={{ marginLeft:'auto', fontSize:11, color:'#94a3b8' }}>
+                  Confidence {Math.round((alert.ocr_fields.confidence || 0) * 100)}%
+                </span>
+              )}
+            </div>
+            {alert.ocr_fields && (
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))', gap:10, marginBottom:12 }}>
+                {[
+                  ['invoice_number', alert.ocr_fields.invoice_number],
+                  ['supplier_name', alert.ocr_fields.supplier_name],
+                  ['currency', alert.ocr_fields.currency],
+                  ['total_amount', alert.ocr_fields.total_amount],
+                  ['subtotal', alert.ocr_fields.subtotal],
+                  ['tax', alert.ocr_fields.tax],
+                  ['discount', alert.ocr_fields.discount],
+                ].map(([label, value]) => (
+                  <div key={label} style={{ padding:'10px 12px', background:'#1a1a2e', borderRadius:8, border:'1px solid #2d2d44' }}>
+                    <div style={{ fontSize:11, color:'#6b7280', textTransform:'uppercase', letterSpacing:0.5, marginBottom:4 }}>{label}</div>
+                    <div style={{ fontSize:13, color:'#e2e8f0', wordBreak:'break-word' }}>{value != null && value !== '' ? String(value) : 'n/a'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {alert.extracted_text_preview && (
+              <div style={{ marginTop:8, padding:12, background:'#1a1a2e', borderRadius:8, border:'1px solid #2d2d44' }}>
+                <div style={{ fontSize:11, color:'#6b7280', textTransform:'uppercase', letterSpacing:0.5, marginBottom:6 }}>
+                  OCR Text Preview
+                </div>
+                <pre style={{ margin:0, fontSize:11, color:'#9ca3af', whiteSpace:'pre-wrap', wordBreak:'break-word', fontFamily:'inherit', lineHeight:1.5, maxHeight:180, overflow:'auto' }}>
+                  {alert.extracted_text_preview}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ ...card(), gridColumn:'1/-1' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+            <Activity size={16} color="#38bdf8" />
+            <h3 style={{ fontSize:14, fontWeight:600, color:'#e2e8f0' }}>Agent Breakdown</h3>
+          </div>
+          {agentLoading ? (
+            <p style={{ fontSize:13, color:'#6b7280' }}>Loading agent results...</p>
+          ) : agentError ? (
+            <p style={{ fontSize:13, color:'#fca5a5' }}>{agentError}</p>
+          ) : agentBreakdown ? (
+            <div style={{ display:'grid', gap:12 }}>
+              <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+                <div style={{ padding:'10px 12px', background:'#1a1a2e', borderRadius:8, minWidth:140 }}>
+                  <div style={{ fontSize:11, color:'#6b7280', marginBottom:4 }}>Risk Score</div>
+                  <div style={{ fontSize:18, fontWeight:700, color:'#e2e8f0' }}>{Math.round(agentBreakdown.risk_score || alert.risk_score || 0)}</div>
+                </div>
+                <div style={{ padding:'10px 12px', background:'#1a1a2e', borderRadius:8, minWidth:140 }}>
+                  <div style={{ fontSize:11, color:'#6b7280', marginBottom:4 }}>Decision</div>
+                  <div style={{ fontSize:18, fontWeight:700, color:'#e2e8f0' }}>{agentBreakdown.decision || 'unknown'}</div>
+                </div>
+                <div style={{ padding:'10px 12px', background:'#1a1a2e', borderRadius:8, minWidth:140 }}>
+                  <div style={{ fontSize:11, color:'#6b7280', marginBottom:4 }}>Trace ID</div>
+                  <div style={{ fontSize:12, fontWeight:600, color:'#e2e8f0', wordBreak:'break-all' }}>{agentBreakdown.trace_id || 'n/a'}</div>
+                </div>
+              </div>
+              <div style={{ display:'grid', gap:8 }}>
+                {Object.entries(agentBreakdown.agents || {}).map(([name, payload]) => {
+                  const asText = payload ? (typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2)) : 'No data returned.';
+                  return (
+                    <div key={name} style={{ padding:'10px 12px', background:'#1a1a2e', borderRadius:8 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', gap:12, marginBottom:6 }}>
+                        <span style={{ fontSize:12, fontWeight:700, color:'#e2e8f0', textTransform:'uppercase' }}>{name}</span>
+                      </div>
+                      <pre style={{ margin:0, fontSize:11, color:'#9ca3af', whiteSpace:'pre-wrap', wordBreak:'break-word', fontFamily:'inherit', lineHeight:1.5 }}>{asText}</pre>
+                    </div>
+                  );
+                })}
+                {(agentBreakdown.pipeline_steps?.length > 0) && (
+                  <div style={{ padding:'10px 12px', background:'#1a1a2e', borderRadius:8 }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:'#e2e8f0', marginBottom:6 }}>Pipeline Steps</div>
+                    <pre style={{ margin:0, fontSize:11, color:'#9ca3af', whiteSpace:'pre-wrap', wordBreak:'break-word', fontFamily:'inherit', lineHeight:1.5 }}>{JSON.stringify(agentBreakdown.pipeline_steps, null, 2)}</pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p style={{ fontSize:13, color:'#6b7280' }}>Open an analyzed invoice to inspect the agent results here.</p>
           )}
         </div>
 

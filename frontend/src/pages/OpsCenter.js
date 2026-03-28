@@ -88,6 +88,7 @@ export default function OpsCenter() {
   const [integrations, setIntegrations] = useState([]);
   const [integrity, setIntegrity] = useState(null);
   const [retention, setRetention] = useState(null);
+  const [auditRetentionDays, setAuditRetentionDays] = useState('');
   const [traceId, setTraceId] = useState('');
   const [traceMessages, setTraceMessages] = useState([]);
   const [selectedProvider, setSelectedProvider] = useState('quickbooks');
@@ -120,6 +121,7 @@ export default function OpsCenter() {
       setIntegrations(integrationsRes.data.providers || []);
       setIntegrity(integrityRes.data);
       setRetention(retentionRes.data);
+      setAuditRetentionDays((current) => current || String(retentionRes.data?.retention_days ?? ''));
     } catch (err) {
       setInfo(err.response?.data?.detail || err.message || 'Failed to load ops center data.');
     } finally {
@@ -210,6 +212,39 @@ export default function OpsCenter() {
       await load();
     } catch (err) {
       setInfo(err.response?.data?.detail || err.message || 'Escalation run failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runMaintenance = async () => {
+    setBusy(true);
+    try {
+      const res = await opsApi.runMaintenance(true);
+      setJsonView(res.data);
+      setInfo('Full maintenance sweep completed.');
+      await load();
+    } catch (err) {
+      setInfo(err.response?.data?.detail || err.message || 'Maintenance sweep failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const archiveAudit = async () => {
+    setBusy(true);
+    try {
+      const params = {};
+      const parsed = Number(auditRetentionDays || retention?.retention_days || 0);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        params.retention_days = parsed;
+      }
+      const res = await auditApi.exportAndPurge(params);
+      setJsonView(res.data);
+      setInfo('Audit archive completed.');
+      await load();
+    } catch (err) {
+      setInfo(err.response?.data?.detail || err.message || 'Audit archive failed.');
     } finally {
       setBusy(false);
     }
@@ -547,6 +582,36 @@ export default function OpsCenter() {
             </div>
           </div>
 
+          <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+            <input
+              style={input}
+              value={auditRetentionDays}
+              onChange={(e) => setAuditRetentionDays(e.target.value)}
+              placeholder={`Retention days (default ${retention?.retention_days ?? 365})`}
+            />
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button
+                onClick={archiveAudit}
+                disabled={busy}
+                style={{
+                  padding: '9px 14px',
+                  background: '#12121a',
+                  border: '1px solid #2d2d44',
+                  borderRadius: 10,
+                  color: '#fca5a5',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <Lock size={14} /> Archive & Purge
+              </button>
+            </div>
+          </div>
+
           <div style={{ display: 'grid', gap: 10 }}>
             <input style={input} value={traceId} onChange={(e) => setTraceId(e.target.value)} placeholder="Trace ID for message lookup" />
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -555,6 +620,9 @@ export default function OpsCenter() {
               </button>
               <button onClick={runEscalations} disabled={busy} style={{ padding: '9px 14px', background: '#12121a', border: '1px solid #2d2d44', borderRadius: 10, color: '#fca5a5', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 <PlayCircle size={14} /> Run Escalations
+              </button>
+              <button onClick={runMaintenance} disabled={busy} style={{ padding: '9px 14px', background: '#12121a', border: '1px solid #2d2d44', borderRadius: 10, color: '#86efac', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <RefreshCw size={14} /> Full Maintenance
               </button>
             </div>
             {traceMessages.length > 0 && (

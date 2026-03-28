@@ -355,7 +355,14 @@ class OrchestratorAgent:
 
     async def _update_job(self, jid, step, progress):
         await self.db.execute(text(
-            "UPDATE processing_jobs SET status='processing', current_step=:s, progress=:p WHERE job_id=:id"
+            """
+            UPDATE processing_jobs
+            SET status='processing',
+                current_step=:s,
+                progress=:p,
+                started_at=COALESCE(started_at, CURRENT_TIMESTAMP)
+            WHERE job_id=:id
+            """
         ), {"s": step, "p": progress, "id": jid})
         await self.db.commit()
 

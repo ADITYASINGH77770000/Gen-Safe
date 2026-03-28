@@ -4,6 +4,7 @@ Powers: Invoice analysis, Alert explanation, Meeting intelligence
 """
 import json
 import hashlib
+import os
 import structlog
 from core.config import settings
 
@@ -14,12 +15,16 @@ _MISSING_KEY_ACTION = (
     "or project-root .env, then restart backend."
 )
 
+def _api_key() -> str:
+    return (settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+
+
 def get_model():
     global _model
     if _model is None:
         try:
             import google.generativeai as genai
-            genai.configure(api_key=settings.GEMINI_API_KEY)
+            genai.configure(api_key=_api_key())
             _model = genai.GenerativeModel(settings.GEMINI_MODEL)
         except Exception as e:
             logger.error("Gemini init failed", error=str(e))
@@ -105,7 +110,7 @@ Respond with ONLY valid JSON:
 """
 
 async def analyze_invoice(invoice_text: str, supplier_info: dict, behavioral_context: dict) -> dict:
-    if not settings.GEMINI_API_KEY:
+    if not _api_key():
         logger.warning("No Gemini API key configured; using mock analysis")
         return _mock_analysis(invoice_text)
     try:
@@ -124,26 +129,20 @@ async def analyze_invoice(invoice_text: str, supplier_info: dict, behavioral_con
             generation_config=genai.types.GenerationConfig(temperature=0.1, max_output_tokens=2048)
         )
         raw = response.text.strip()
-        if "```" in raw:
-            parts = raw.split("```")
-            for part in parts:
-                if part.strip().startswith("{"):
-                    raw = part.strip()
-                    break
-        result = json.loads(raw)
+        result = _parse_json_or_repair(model, raw, schema_name="invoice analysis")
+        if result is None:
+            logger.error("Gemini response could not be parsed", raw_preview=raw[:500])
+            return _mock_analysis(invoice_text, error="Gemini response could not be parsed as JSON")
         result["agent"] = "gemini_llm"
         result["model"] = settings.GEMINI_MODEL
         result["input_hash"] = hashlib.sha256(invoice_text.encode()).hexdigest()[:16]
         return result
-    except json.JSONDecodeError as e:
-        logger.error("Gemini JSON parse error", error=str(e))
-        return _mock_analysis(invoice_text, error=f"JSON parse error: {e}")
     except Exception as e:
         logger.error("Gemini API error", error=str(e))
         return _mock_analysis(invoice_text, error=f"Gemini API error: {e}")
 
 async def generate_explanation(analysis: dict, invoice_number: str, supplier_name: str, amount: float, currency: str, risk_score: float) -> str:
-    if not settings.GEMINI_API_KEY:
+    if not _api_key():
         return _mock_explanation(
             risk_score,
             supplier_name,
@@ -183,7 +182,7 @@ async def generate_explanation(analysis: dict, invoice_number: str, supplier_nam
         )
 
 async def extract_meeting_items(transcript: str) -> dict:
-    if not settings.GEMINI_API_KEY:
+    if not _api_key():
         return {"decisions": [], "action_items": [], "open_questions": [], "summary": "No Gemini API key configured."}
     try:
         import google.generativeai as genai
@@ -196,16 +195,69 @@ async def extract_meeting_items(transcript: str) -> dict:
             generation_config=genai.types.GenerationConfig(temperature=0.1, max_output_tokens=2048)
         )
         raw = response.text.strip()
-        if "```" in raw:
-            parts = raw.split("```")
-            for part in parts:
-                if part.strip().startswith("{"):
-                    raw = part.strip()
-                    break
-        return json.loads(raw)
+        parsed = _parse_json_or_repair(model, raw, schema_name="meeting extraction")
+        if parsed is not None:
+            return parsed
+        logger.error("Meeting extraction could not be parsed", raw_preview=raw[:500])
+        return {"decisions": [], "action_items": [], "open_questions": [], "summary": "Gemini response could not be parsed as JSON."}
     except Exception as e:
         logger.error("Meeting extraction failed", error=str(e))
         return {"decisions": [], "action_items": [], "open_questions": [], "summary": f"Extraction failed: {e}"}
+
+
+def _strip_code_fences(raw: str) -> str:
+    text = (raw or "").strip()
+    if "```" not in text:
+        return text
+    parts = text.split("```")
+    for part in parts:
+        candidate = part.strip()
+        if candidate.startswith("{") or candidate.startswith("["):
+            return candidate
+    return text
+
+
+def _extract_json_blob(raw: str) -> str | None:
+    text = _strip_code_fences(raw)
+    start_candidates = [idx for idx in (text.find("{"), text.find("[")) if idx >= 0]
+    if not start_candidates:
+        return None
+    start = min(start_candidates)
+    end = max(text.rfind("}"), text.rfind("]"))
+    if end <= start:
+        return None
+    return text[start : end + 1]
+
+
+def _parse_json_or_repair(model, raw: str, schema_name: str) -> dict | None:
+    candidates = [_strip_code_fences(raw)]
+    blob = _extract_json_blob(raw)
+    if blob and blob not in candidates:
+        candidates.append(blob)
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except Exception:
+            continue
+
+    try:
+        import google.generativeai as genai
+        repair_prompt = (
+            f"Convert the following {schema_name} output into valid JSON only. "
+            "Preserve the meaning, remove any commentary, and return JSON with double-quoted keys and strings.\n\n"
+            f"RAW OUTPUT:\n{raw}"
+        )
+        repair_response = model.generate_content(
+            repair_prompt,
+            generation_config=genai.types.GenerationConfig(temperature=0.0, max_output_tokens=2048),
+        )
+        repaired = _extract_json_blob(repair_response.text or "")
+        if repaired:
+            return json.loads(repaired)
+    except Exception as exc:
+        logger.warning("Gemini repair attempt failed", error=str(exc), schema=schema_name)
+    return None
 
 def _mock_analysis(text: str, error: str = None) -> dict:
     score = 35.0
@@ -222,7 +274,7 @@ def _mock_analysis(text: str, error: str = None) -> dict:
         "risk_level": "low" if score < 40 else "medium" if score < 70 else "high",
         "flags": flags,
         "explanation": (
-            f"Mock analysis because no Gemini key is configured. Text length: {len(text)} chars."
+            f"Mock analysis fallback. Text length: {len(text)} chars."
             + (f" Note: {error}" if error else "")
         ),
         "recommended_action": _MISSING_KEY_ACTION,

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Shield, AlertTriangle, FileText, Users, CheckSquare, BookOpen, LogOut, Menu, X, Bell, SlidersHorizontal } from 'lucide-react';
+import { Shield, AlertTriangle, FileText, Users, CheckSquare, BookOpen, LogOut, Menu, X, Bell, SlidersHorizontal, Activity } from 'lucide-react';
 import RobotGuide from './RobotGuide';
 import ThreeBackdrop from './ThreeBackdrop';
 
@@ -68,6 +68,7 @@ const NAV = [
   { to:'/tasks', icon:CheckSquare, label:'Tasks' },
   { to:'/audit', icon:BookOpen, label:'Audit Trail' },
   { to:'/ops-center', icon:SlidersHorizontal, label:'Ops Center' },
+  { to:'/health', icon:Activity, label:'Health Monitor' },
 ];
 
 export default function Layout() {
