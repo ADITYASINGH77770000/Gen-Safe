@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
@@ -5,6 +7,11 @@ from core.config import settings
 import structlog
 
 logger = structlog.get_logger()
+def _public_base_url() -> str:
+    host = (os.getenv("PUBLIC_APP_URL") or os.getenv("VERCEL_URL") or "").strip()
+    if host and not host.startswith("http"):
+        host = f"https://{host}"
+    return host.rstrip("/")
 
 _is_sqlite = settings.DATABASE_URL.lower().startswith("sqlite")
 _connect_args = {"check_same_thread": False} if _is_sqlite else {}
@@ -332,20 +339,25 @@ async def _seed_defaults(conn):
             row,
         )
 
+    public_base_url = _public_base_url()
     integrations = [
         {
             "provider": "quickbooks",
             "auth_url": "https://appcenter.intuit.com/connect/oauth2",
             "token_url": "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
             "scopes": "com.intuit.quickbooks.accounting",
-            "redirect_uri": "http://localhost:8000/api/v1/integration/quickbooks/callback",
+            "redirect_uri": f"{public_base_url}/api/v1/integration/quickbooks/callback"
+            if public_base_url
+            else "http://localhost:8000/api/v1/integration/quickbooks/callback",
         },
         {
             "provider": "xero",
             "auth_url": "https://login.xero.com/identity/connect/authorize",
             "token_url": "https://identity.xero.com/connect/token",
             "scopes": "openid profile email accounting.transactions offline_access",
-            "redirect_uri": "http://localhost:8000/api/v1/integration/xero/callback",
+            "redirect_uri": f"{public_base_url}/api/v1/integration/xero/callback"
+            if public_base_url
+            else "http://localhost:8000/api/v1/integration/xero/callback",
         },
     ]
     for row in integrations:

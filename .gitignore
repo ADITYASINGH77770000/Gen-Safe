@@ -21,6 +21,7 @@ gensafe.db
 static/
 backend/static/
 docx/
+public/
 
 # OS / editor clutter
 .DS_Store

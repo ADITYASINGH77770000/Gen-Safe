@@ -98,6 +98,15 @@ class Settings(BaseSettings):
             key = ""
 
         self.GEMINI_API_KEY = key
+
+        if os.getenv("VERCEL"):
+            if self.DATABASE_URL == "sqlite+aiosqlite:///./gensafe.db":
+                self.DATABASE_URL = "sqlite+aiosqlite:////tmp/gensafe.db"
+            if self.UPLOAD_DIR == "./static/uploads":
+                self.UPLOAD_DIR = "/tmp/gensafe-uploads"
+            if self.AUDIT_ARCHIVE_DIR == "./static/audit-archive":
+                self.AUDIT_ARCHIVE_DIR = "/tmp/gensafe-audit-archive"
+            self.ENABLE_BACKGROUND_MAINTENANCE = False
         return self
 
 settings = Settings()

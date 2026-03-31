@@ -1,0 +1,10 @@
+[project]
+name = "gensafe-b2b"
+version = "1.0.0"
+requires-python = ">=3.12"
+
+[project.scripts]
+app = "backend.main:app"
+
+[tool.vercel.scripts]
+build = "python scripts/build_vercel.py"

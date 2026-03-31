@@ -23,9 +23,10 @@ def _prepend_project_venv() -> None:
 _prepend_project_venv()
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.routes.all_routes import (
@@ -50,6 +51,9 @@ from services.audit_maintenance import AuditMaintenanceService
 from services.escalation_service import EscalationService
 
 logger = structlog.get_logger()
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PUBLIC_DIR = PROJECT_ROOT / "public"
+IS_VERCEL = bool(os.getenv("VERCEL"))
 
 
 def _split_csv(value: str, fallback: list[str]) -> list[str]:
@@ -97,7 +101,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     maintenance_task = None
-    if settings.ENABLE_BACKGROUND_MAINTENANCE:
+    if settings.ENABLE_BACKGROUND_MAINTENANCE and not IS_VERCEL:
         maintenance_task = asyncio.create_task(_maintenance_loop())
     yield
     if maintenance_task:
@@ -139,8 +143,8 @@ async def security_headers(request, call_next):
     return response
 
 
-os.makedirs("static/uploads", exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="static/uploads"), name="uploads")
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["Auth"])
 app.include_router(invoice_router, prefix="/api/v1/invoice", tags=["Invoices"])
@@ -158,9 +162,22 @@ app.include_router(selfcorrect_router, prefix="/api/v1/selfcorrect", tags=["Self
 
 @app.get("/")
 async def root():
+    index_file = PUBLIC_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
     return {"system": "GenSafe B2B", "status": "running", "docs": "/docs"}
 
 
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+@app.get("/{path:path}", include_in_schema=False)
+async def spa_fallback(path: str):
+    if path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    index_file = PUBLIC_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return {"system": "GenSafe B2B", "status": "running", "docs": "/docs"}

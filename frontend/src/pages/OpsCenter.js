@@ -51,18 +51,26 @@ const emptyWebhook = {
   invoice_text: 'Invoice 1001 from Demo Supplier\nPO: 8842\nTerms: Net 30',
 };
 
+const backendOrigin =
+  process.env.REACT_APP_API_URL ||
+  (typeof window !== 'undefined' && (window.location.port === '3000' || window.location.port === '3001')
+    ? 'http://localhost:8000'
+    : typeof window !== 'undefined'
+      ? window.location.origin
+      : 'http://localhost:8000');
+
 const providerDefaults = {
   quickbooks: {
     client_id: '',
     client_secret: '',
-    redirect_uri: 'http://localhost:8000/api/v1/integration/quickbooks/callback',
+    redirect_uri: `${backendOrigin}/api/v1/integration/quickbooks/callback`,
     scopes: 'com.intuit.quickbooks.accounting',
     enabled: true,
   },
   xero: {
     client_id: '',
     client_secret: '',
-    redirect_uri: 'http://localhost:8000/api/v1/integration/xero/callback',
+    redirect_uri: `${backendOrigin}/api/v1/integration/xero/callback`,
     scopes: 'openid profile email accounting.transactions offline_access',
     enabled: true,
   },
