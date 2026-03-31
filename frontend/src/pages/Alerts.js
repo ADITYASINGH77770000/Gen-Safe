@@ -1,20 +1,48 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, CheckCircle, XCircle, Clock, Filter } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Clock } from 'lucide-react';
 import { alertApi } from '../services/api';
 
-const card = { background:'#12121a', border:'1px solid #1e1e2e', borderRadius:12, padding:20 };
-const RISK_COLORS = { critical:'#ef4444', high:'#f97316', medium:'#eab308', low:'#22c55e', unknown:'#6b7280' };
+const RISK_COLORS = { critical: 'var(--red)', high: 'var(--amber)', medium: 'var(--violet)', low: 'var(--green)', unknown: 'var(--text-secondary)' };
 
-function RiskBadge({ level }) {
-  const color = RISK_COLORS[level] || '#6b7280';
-  return <span style={{ background:`${color}20`, color, padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:600, textTransform:'uppercase', border:`1px solid ${color}40` }}>{level}</span>;
+const FILTERS = [
+  { key: '', label: 'ALL' },
+  { key: 'open', label: 'OPEN' },
+  { key: 'resolved', label: 'RESOLVED' },
+  { key: 'false_positive', label: 'FALSE POSITIVE' },
+];
+
+function relativeTime(value) {
+  if (!value) return 'n/a';
+  const diff = Date.now() - new Date(value).getTime();
+  const mins = Math.max(1, Math.floor(diff / 60000));
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function StatusBadge({ status }) {
-  const map = { open:['#1d4ed8','#93c5fd'], resolved:['#14532d','#86efac'], false_positive:['#713f12','#fde68a'] };
-  const [bg, text] = map[status] || ['#374151','#9ca3af'];
-  return <span style={{ background:`${bg}60`, color:text, padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:500 }}>{status?.replace('_',' ')}</span>;
+function RiskPill({ level }) {
+  const color = RISK_COLORS[level] || RISK_COLORS.unknown;
+  return (
+    <span className="pill" style={{ background: `${color}18`, color, border: `1px solid ${color}40` }}>
+      {level || 'unknown'}
+    </span>
+  );
+}
+
+function StatusPill({ status }) {
+  const map = {
+    open: { bg: 'rgba(0,212,255,0.08)', fg: 'var(--cyan)', border: 'rgba(0,212,255,0.18)' },
+    resolved: { bg: 'rgba(0,232,135,0.08)', fg: 'var(--green)', border: 'rgba(0,232,135,0.18)' },
+    false_positive: { bg: 'rgba(255,184,0,0.08)', fg: 'var(--amber)', border: 'rgba(255,184,0,0.18)' },
+  };
+  const tone = map[status] || { bg: 'rgba(255,255,255,0.04)', fg: 'var(--text-secondary)', border: 'var(--border)' };
+  return (
+    <span className="pill" style={{ background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}` }}>
+      {String(status || 'open').replace('_', ' ')}
+    </span>
+  );
 }
 
 export default function Alerts() {
@@ -23,72 +51,146 @@ export default function Alerts() {
   const [filter, setFilter] = useState('');
   const navigate = useNavigate();
 
-  const load = (status='') => {
+  const load = (status = '') => {
     setLoading(true);
-    alertApi.list({ status: status || undefined, limit:100 })
-      .then(r => setAlerts(r.data.alerts || []))
+    alertApi
+      .list({ status: status || undefined, limit: 100 })
+      .then((r) => setAlerts(r.data.alerts || []))
       .catch(console.error)
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
-  const handleFilter = (s) => { setFilter(s); load(s); };
+  const openCount = useMemo(() => alerts.filter((item) => item.status === 'open').length, [alerts]);
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 20, gap: 16, flexWrap: 'wrap' }}>
         <div>
-          <h1 style={{ fontSize:22, fontWeight:700, color:'#e2e8f0' }}>Alert Queue</h1>
-          <p style={{ fontSize:13, color:'#6b7280', marginTop:4 }}>{alerts.length} alerts found</p>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: 'var(--text-primary)' }}>ALERT QUEUE</h1>
+          <div className="jet-mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8 }}>
+            {alerts.length} total alerts
+          </div>
         </div>
-        <div style={{ display:'flex', gap:8 }}>
-          {['','open','resolved','false_positive'].map(s => (
-            <button key={s} onClick={() => handleFilter(s)}
-              style={{ padding:'6px 14px', borderRadius:8, border:'1px solid', fontSize:12, cursor:'pointer', fontWeight:500,
-                borderColor: filter===s ? '#4B3CA7' : '#2d2d44',
-                background: filter===s ? '#2D1B6E' : '#12121a',
-                color: filter===s ? '#a78bfa' : '#6b7280' }}>
-              {s || 'All'}
-            </button>
-          ))}
+        <div
+          className="pill"
+          style={{
+            background: 'rgba(255,58,92,0.12)',
+            color: 'var(--red)',
+            border: '1px solid rgba(255,58,92,0.24)',
+          }}
+        >
+          {openCount} OPEN
         </div>
       </div>
 
-      <div style={card}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+        {FILTERS.map((item) => {
+          const active = filter === item.key;
+          return (
+            <button
+              key={item.key || 'all'}
+              onClick={() => {
+                setFilter(item.key);
+                load(item.key);
+              }}
+              style={{
+                height: 34,
+                padding: '0 14px',
+                borderRadius: 999,
+                border: active ? '1px solid var(--cyan)' : '1px solid var(--border)',
+                background: active ? 'var(--cyan)' : 'var(--bg-surface)',
+                color: active ? 'var(--bg-deep)' : 'var(--text-secondary)',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 600,
+                letterSpacing: 0.4,
+                transition: 'all 160ms ease',
+              }}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {loading ? (
-          <div style={{ textAlign:'center', padding:40, color:'#6b7280', fontSize:13 }}>Loading alerts...</div>
+          <div className="panel" style={{ padding: 30, textAlign: 'center', color: 'var(--text-dim)' }}>
+            Loading alerts...
+          </div>
         ) : alerts.length === 0 ? (
-          <div style={{ textAlign:'center', padding:40, color:'#4b5563', fontSize:13 }}>
+          <div className="panel" style={{ padding: 30, textAlign: 'center', color: 'var(--text-dim)' }}>
             No alerts found. Submit invoices via the Invoices page to see AI detection results.
           </div>
         ) : (
-          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            {alerts.map(a => (
-              <div key={a.alert_id} onClick={() => navigate(`/alerts/${a.alert_id}`)}
-                style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 16px', background:'#1a1a2e', borderRadius:10, cursor:'pointer', border:'1px solid #2d2d44', transition:'border-color .15s' }}
-                onMouseEnter={e => e.currentTarget.style.borderColor='#4B3CA7'}
-                onMouseLeave={e => e.currentTarget.style.borderColor='#2d2d44'}>
-                <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-                  <AlertTriangle size={16} color={RISK_COLORS[a.risk_level] || '#6b7280'} />
-                  <div>
-                    <p style={{ fontSize:14, color:'#e2e8f0', fontWeight:500 }}>{a.supplier_name || 'Unknown Supplier'}</p>
-                    <p style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>
-                      {a.invoice_number} · {a.currency} {Number(a.amount||0).toLocaleString()} · {a.created_at?.slice(0,10)}
-                    </p>
+          alerts.map((alert) => {
+            const color = RISK_COLORS[alert.risk_level] || RISK_COLORS.unknown;
+            const score = Math.round(alert.risk_score || 0);
+            const critical = (alert.risk_level || '').toLowerCase() === 'critical';
+            return (
+              <div
+                key={alert.alert_id}
+                onClick={() => navigate(`/alerts/${alert.alert_id}`)}
+                className="panel panel-hover"
+                style={{
+                  padding: 18,
+                  borderLeft: `3px solid ${color}`,
+                  cursor: 'pointer',
+                  position: 'relative',
+                  overflow: 'hidden',
+                  boxShadow: critical ? `0 0 0 1px rgba(255,58,92,0.22), 0 0 24px rgba(255,58,92,0.12)` : undefined,
+                }}
+              >
+                <div style={{ display: 'grid', gridTemplateColumns: '56px 1.8fr 1fr auto', gap: 16, alignItems: 'center' }}>
+                  <div
+                    style={{
+                      width: 46,
+                      height: 46,
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: `radial-gradient(circle, ${color}33, ${color}08 72%)`,
+                      border: `1px solid ${color}40`,
+                      color,
+                      fontFamily: 'JetBrains Mono, monospace',
+                      fontWeight: 700,
+                      fontSize: 18,
+                    }}
+                  >
+                    {score}
                   </div>
-                </div>
-                <div style={{ display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
-                  <div style={{ textAlign:'right' }}>
-                    <span style={{ fontSize:20, fontWeight:700, color: (a.risk_score||0)>=80?'#ef4444':(a.risk_score||0)>=60?'#f97316':'#eab308' }}>{Math.round(a.risk_score||0)}</span>
-                    <span style={{ fontSize:11, color:'#6b7280' }}>/100</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 15, color: 'var(--text-primary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {alert.supplier_name || 'Unknown Supplier'}
+                    </div>
+                    <div className="jet-mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>
+                      {alert.invoice_number} - {alert.created_at?.slice(0, 10)} - {relativeTime(alert.created_at)}
+                    </div>
                   </div>
-                  <RiskBadge level={a.risk_level || 'unknown'} />
-                  <StatusBadge status={a.status} />
+                  <div style={{ justifySelf: 'end', textAlign: 'right' }}>
+                    <div className="jet-mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {Number(alert.amount || 0).toLocaleString()} {alert.currency}
+                    </div>
+                    <div className="jet-mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
+                      Traceable risk record
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                      <RiskPill level={alert.risk_level} />
+                      <StatusPill status={alert.status} />
+                    </div>
+                    <ArrowRight size={16} color="var(--cyan)" />
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
+            );
+          })
         )}
       </div>
     </div>

@@ -1,8 +1,26 @@
 """GenSafe B2B - FastAPI Application (No Docker version)"""
 import asyncio
 import os
+import sys
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
+from pathlib import Path
+
+
+def _prepend_project_venv() -> None:
+    """Make sure the app can import dependencies from backend/.venv.
+
+    This keeps the backend runnable even when the IDE launches the system
+    interpreter instead of the project virtual environment.
+    """
+    venv_site_packages = Path(__file__).resolve().parent / ".venv" / "Lib" / "site-packages"
+    if venv_site_packages.is_dir():
+        path = str(venv_site_packages)
+        if path not in sys.path:
+            sys.path.insert(0, path)
+
+
+_prepend_project_venv()
 
 import structlog
 from fastapi import FastAPI

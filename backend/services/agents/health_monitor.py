@@ -50,7 +50,7 @@ class WorkflowHealthMonitor:
                   AND COALESCE(started_at, created_at) < :threshold
                 """
             ),
-            {"threshold": threshold.isoformat()},
+            {"threshold": threshold.strftime("%Y-%m-%d %H:%M:%S")},
         )
         rows = result.mappings().all()
         for row in rows:
@@ -95,7 +95,7 @@ class WorkflowHealthMonitor:
                   AND created_at < :threshold
                 """
             ),
-            {"threshold": threshold.isoformat()},
+            {"threshold": threshold.strftime("%Y-%m-%d %H:%M:%S")},
         )
         rows = result.mappings().all()
         for row in rows:

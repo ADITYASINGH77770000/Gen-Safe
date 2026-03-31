@@ -7,8 +7,8 @@ import {
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
 
 const card = {
-  background: 'linear-gradient(160deg, rgba(18,18,26,0.96), rgba(12,16,24,0.96))',
-  border: '1px solid #1e1e2e',
+  background: 'var(--bg-surface)',
+  border: '1px solid var(--border)',
   borderRadius: 16,
   padding: 20,
   boxShadow: '0 20px 45px rgba(0,0,0,0.22)',
@@ -16,11 +16,11 @@ const card = {
 
 const input = {
   width: '100%',
-  background: '#1a1a2e',
-  border: '1px solid #2d2d44',
+  background: 'var(--bg-elevated)',
+  border: '1px solid var(--border)',
   borderRadius: 10,
   padding: '10px 12px',
-  color: '#e2e8f0',
+  color: 'var(--text-primary)',
   fontSize: 13,
   outline: 'none',
 };
@@ -136,13 +136,13 @@ export default function OpsCenter() {
   useEffect(() => {
     const selected = providerMap.get(selectedProvider);
     if (selected) {
-      setProviderForm({
-        client_id: selected.client_id || '',
-        client_secret: selected.client_secret || '',
+      setProviderForm((current) => ({
+        client_id: selected.client_id || current.client_id || '',
+        client_secret: '',
         redirect_uri: selected.redirect_uri || providerDefaults[selectedProvider].redirect_uri,
         scopes: selected.scopes || providerDefaults[selectedProvider].scopes,
         enabled: Boolean(selected.enabled),
-      });
+      }));
     } else {
       setProviderForm(providerDefaults[selectedProvider] || providerDefaults.quickbooks);
     }
@@ -180,9 +180,11 @@ export default function OpsCenter() {
 
   const refreshStatus = async (provider) => {
     setBusy(true);
+    setInfo('');
     try {
       const res = await integrationApi.status(provider);
       setJsonView(res.data);
+      setInfo(`${provider} status refreshed.`);
     } catch (err) {
       setInfo(err.response?.data?.detail || err.message || 'Status check failed.');
     } finally {
@@ -192,9 +194,11 @@ export default function OpsCenter() {
 
   const refreshToken = async (provider) => {
     setBusy(true);
+    setInfo('');
     try {
       const res = await integrationApi.refresh(provider);
       setJsonView(res.data);
+      setInfo(`${provider} token refreshed.`);
       await load();
     } catch (err) {
       setInfo(err.response?.data?.detail || err.message || 'Token refresh failed.');
@@ -301,6 +305,7 @@ export default function OpsCenter() {
   ], [healthMetrics]);
   const integritySummary = integrity || {};
   const providerEntries = ['quickbooks', 'xero'];
+  const selectedProviderInfo = providerMap.get(selectedProvider);
 
   return (
     <div>
@@ -517,6 +522,16 @@ export default function OpsCenter() {
               <input type="checkbox" checked={Boolean(providerForm.enabled)} onChange={(e) => setProviderForm((p) => ({ ...p, enabled: e.target.checked }))} />
               Enabled
             </label>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            <StatusPill ok={Boolean(selectedProviderInfo?.configured)} label={selectedProviderInfo?.configured ? 'Configured' : 'Missing credentials'} />
+            <StatusPill ok={Boolean(selectedProviderInfo?.connected)} label={selectedProviderInfo?.connected ? 'Connected' : 'Not connected'} />
+            {selectedProviderInfo?.has_client_secret ? (
+              <span style={smallBadge({ bg: 'rgba(56,189,248,0.10)', fg: '#a5f3fc', border: 'rgba(56,189,248,0.28)' })}>Secret stored</span>
+            ) : (
+              <span style={smallBadge({ bg: 'rgba(148,163,184,0.10)', fg: '#cbd5e1', border: 'rgba(148,163,184,0.28)' })}>Secret needed</span>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

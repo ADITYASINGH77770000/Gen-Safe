@@ -126,6 +126,7 @@ cp backend/.env.example backend/.env
 
 ```bash
 cd backend
+<<<<<<< Updated upstream
 python -m venv .venv
 
 # Windows
@@ -135,6 +136,9 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+=======
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+>>>>>>> Stashed changes
 ```
 
 ### 3. Frontend

@@ -9,80 +9,137 @@ export default function ThreeBackdrop() {
     if (!host) return undefined;
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 200);
-    camera.position.z = 45;
+    scene.fog = new THREE.Fog(0x060910, 42, 170);
+
+    const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 260);
+    camera.position.set(0, 8, 50);
 
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
       powerPreference: 'high-performance',
     });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.7));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
     renderer.setSize(host.clientWidth, host.clientHeight);
     renderer.setClearColor(0x000000, 0);
     host.appendChild(renderer.domElement);
 
-    const ambient = new THREE.AmbientLight(0x5db9ff, 0.55);
+    const ambient = new THREE.AmbientLight(0x1a2a4a, 1.2);
     scene.add(ambient);
 
-    const pointA = new THREE.PointLight(0x48f0ff, 1.1, 140);
-    pointA.position.set(22, 8, 28);
-    scene.add(pointA);
+    const keyLight = new THREE.PointLight(0x00d4ff, 0.8, 180);
+    keyLight.position.set(30, 20, 20);
+    scene.add(keyLight);
 
-    const pointB = new THREE.PointLight(0x7f6cff, 0.95, 140);
-    pointB.position.set(-26, -10, 20);
-    scene.add(pointB);
+    const rimLight = new THREE.PointLight(0x7c6fff, 0.6, 180);
+    rimLight.position.set(-28, -14, 18);
+    scene.add(rimLight);
 
-    const torus = new THREE.Mesh(
-      new THREE.TorusKnotGeometry(10, 2.1, 220, 26),
-      new THREE.MeshStandardMaterial({
-        color: 0xa6dbff,
-        metalness: 0.68,
-        roughness: 0.24,
-        emissive: 0x04364d,
-        emissiveIntensity: 0.35,
-      })
-    );
-    torus.position.set(0, 2, -8);
-    scene.add(torus);
+    const grid = new THREE.GridHelper(220, 44, 0x00d4ff, 0x163244);
+    grid.position.y = -24;
+    grid.material.transparent = true;
+    grid.material.opacity = 0.08;
+    scene.add(grid);
 
-    const wire = new THREE.Mesh(
-      new THREE.TorusGeometry(19, 0.32, 18, 160),
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(18, 0.15, 16, 240),
       new THREE.MeshBasicMaterial({
-        color: 0x39f4ff,
+        color: 0x00d4ff,
         transparent: true,
-        opacity: 0.33,
+        opacity: 0.25,
       })
     );
-    wire.position.set(8, -8, -20);
-    wire.rotation.x = 0.7;
-    scene.add(wire);
+    ring.position.set(0, 2, -16);
+    ring.rotation.x = Math.PI / 2.3;
+    scene.add(ring);
 
-    const particleCount = 480;
-    const pointsGeometry = new THREE.BufferGeometry();
-    const points = new Float32Array(particleCount * 3);
-    for (let i = 0; i < particleCount; i += 1) {
-      points[i * 3 + 0] = (Math.random() - 0.5) * 120;
-      points[i * 3 + 1] = (Math.random() - 0.5) * 90;
-      points[i * 3 + 2] = (Math.random() - 0.5) * 80;
+    const scan = new THREE.Mesh(
+      new THREE.PlaneGeometry(220, 0.5),
+      new THREE.MeshBasicMaterial({
+        color: 0x00d4ff,
+        transparent: true,
+        opacity: 0.045,
+        side: THREE.DoubleSide,
+      })
+    );
+    scan.position.set(0, 40, -20);
+    scene.add(scan);
+
+    const nodeGroup = new THREE.Group();
+    const nodes = [];
+    const nodeGeometry = new THREE.IcosahedronGeometry(0.6, 0);
+    const nodeCount = 30;
+    for (let i = 0; i < nodeCount; i += 1) {
+      const material = new THREE.MeshStandardMaterial({
+        color: i % 2 === 0 ? 0x00d4ff : 0x7c6fff,
+        metalness: 0.9,
+        roughness: 0.1,
+        emissive: i % 2 === 0 ? 0x001a22 : 0x120f2b,
+        emissiveIntensity: 0.2,
+      });
+      const mesh = new THREE.Mesh(nodeGeometry.clone(), material);
+      mesh.scale.setScalar(THREE.MathUtils.randFloat(0.3, 0.8));
+      mesh.position.set(
+        THREE.MathUtils.randFloatSpread(120),
+        THREE.MathUtils.randFloatSpread(90),
+        THREE.MathUtils.randFloat(-40, -5)
+      );
+      mesh.userData = {
+        speed: THREE.MathUtils.randFloat(0.0005, 0.0018),
+        axis: new THREE.Vector3(
+          Math.random() - 0.5,
+          Math.random() - 0.5,
+          Math.random() - 0.5
+        ).normalize(),
+      };
+      nodes.push(mesh);
+      nodeGroup.add(mesh);
     }
-    pointsGeometry.setAttribute('position', new THREE.BufferAttribute(points, 3));
+    scene.add(nodeGroup);
 
-    const particles = new THREE.Points(
-      pointsGeometry,
-      new THREE.PointsMaterial({
-        color: 0x9be8ff,
-        size: 0.28,
-        transparent: true,
-        opacity: 0.45,
-      })
-    );
-    scene.add(particles);
+    const lineGroup = new THREE.Group();
+    scene.add(lineGroup);
+
+    const buildConnections = () => {
+      lineGroup.clear();
+      const maxDistanceSq = 20 * 20;
+      for (let i = 0; i < nodes.length; i += 1) {
+        for (let j = i + 1; j < nodes.length; j += 1) {
+          const a = nodes[i].position;
+          const b = nodes[j].position;
+          if (a.distanceToSquared(b) > maxDistanceSq) continue;
+          const geometry = new THREE.BufferGeometry().setFromPoints([a.clone(), b.clone()]);
+          const line = new THREE.Line(
+            geometry,
+            new THREE.LineBasicMaterial({
+              color: 0x00d4ff,
+              transparent: true,
+              opacity: 0.15,
+            })
+          );
+          lineGroup.add(line);
+        }
+      }
+    };
+    buildConnections();
+    const lineTimer = window.setInterval(buildConnections, 3000);
 
     let raf = 0;
-    const prefersReducedMotion = window.matchMedia?.(
-      '(prefers-reduced-motion: reduce)'
-    )?.matches;
+    let mouseX = 0;
+    let mouseY = 0;
+    let targetTiltX = 0;
+    let targetTiltY = 0;
+    const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+
+    const onPointerMove = (event) => {
+      const rect = host.getBoundingClientRect();
+      const x = (event.clientX - rect.left) / rect.width;
+      const y = (event.clientY - rect.top) / rect.height;
+      mouseX = x * 2 - 1;
+      mouseY = y * 2 - 1;
+      targetTiltX = mouseY * 0.04;
+      targetTiltY = mouseX * 0.04;
+    };
 
     const onResize = () => {
       const width = host.clientWidth || window.innerWidth;
@@ -91,19 +148,30 @@ export default function ThreeBackdrop() {
       camera.updateProjectionMatrix();
       renderer.setSize(width, height);
     };
-    onResize();
-    window.addEventListener('resize', onResize);
 
+    host.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('resize', onResize);
+    onResize();
+
+    let scanOffset = 40;
     const animate = () => {
       raf = requestAnimationFrame(animate);
       if (!prefersReducedMotion) {
-        const t = performance.now() * 0.00035;
-        torus.rotation.x += 0.0024;
-        torus.rotation.y += 0.0027;
-        wire.rotation.z -= 0.0018;
-        particles.rotation.y += 0.0004;
-        pointA.position.y = 8 + Math.sin(t * 3.1) * 4;
-        pointB.position.x = -26 + Math.cos(t * 2.8) * 5;
+        const t = performance.now() * 0.0002;
+        nodeGroup.children.forEach((node) => {
+          node.rotation.x += node.userData.speed;
+          node.rotation.y += node.userData.speed * 1.4;
+          node.position.x += Math.sin(t + node.position.y * 0.01) * 0.01;
+          node.position.y += Math.cos(t + node.position.x * 0.01) * 0.008;
+        });
+        ring.rotation.y += 0.001;
+        scan.position.y = scanOffset;
+        scanOffset -= 0.12;
+        if (scanOffset < -40) scanOffset = 40;
+        camera.rotation.x += (targetTiltX - camera.rotation.x) * 0.03;
+        camera.rotation.y += (targetTiltY - camera.rotation.y) * 0.03;
+        keyLight.position.y = 18 + Math.sin(t * 2.8) * 4;
+        rimLight.position.x = -28 + Math.cos(t * 2.4) * 4;
       }
       renderer.render(scene, camera);
     };
@@ -111,12 +179,14 @@ export default function ThreeBackdrop() {
 
     return () => {
       cancelAnimationFrame(raf);
+      window.clearInterval(lineTimer);
+      host.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('resize', onResize);
       scene.traverse((obj) => {
         if (obj.geometry) obj.geometry.dispose?.();
         if (obj.material) {
           if (Array.isArray(obj.material)) {
-            obj.material.forEach((m) => m.dispose?.());
+            obj.material.forEach((material) => material.dispose?.());
           } else {
             obj.material.dispose?.();
           }
@@ -137,7 +207,7 @@ export default function ThreeBackdrop() {
         inset: 0,
         zIndex: 0,
         pointerEvents: 'none',
-        opacity: 0.5,
+        opacity: 0.62,
       }}
       aria-hidden="true"
     />

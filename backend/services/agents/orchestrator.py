@@ -17,6 +17,13 @@ from services.agents.fraud_simulation_agent import FraudSimulationAgent
 
 logger = structlog.get_logger()
 
+try:
+    from services.agents.langgraph_orchestrator import LangGraphOrchestrator
+    _LANGGRAPH_AVAILABLE = True
+except ImportError:
+    _LANGGRAPH_AVAILABLE = False
+    logger.warning("langgraph not installed - falling back to legacy asyncio pipeline")
+
 class OrchestratorAgent:
     def __init__(self, db):
         self.db = db
@@ -30,6 +37,10 @@ class OrchestratorAgent:
         self.fraud_sim = FraudSimulationAgent()
 
     async def process_invoice(self, invoice_id: str, job_id: str) -> dict:
+        if _LANGGRAPH_AVAILABLE:
+            lg = LangGraphOrchestrator(self.db)
+            return await lg.process_invoice(invoice_id, job_id)
+
         trace_id = str(uuid.uuid4())
         log = logger.bind(invoice_id=invoice_id, trace_id=trace_id)
         log.info("Orchestrator starting")
@@ -237,6 +248,7 @@ class OrchestratorAgent:
                 "multilingual_analysis": multi_result,
                 "fraud_simulation_analysis": fraud_result,
                 "verification": verification,
+                "langgraph": False,
                 "processed_at": datetime.utcnow().isoformat()
             }
             await self._complete_job(job_id, result)

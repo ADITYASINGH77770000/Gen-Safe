@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { taskApi } from '../services/api';
-import { CheckSquare, Plus, Clock, CheckCircle, AlertTriangle, Brain } from 'lucide-react';
+import { CheckSquare, Clock, CheckCircle, AlertTriangle, Brain, ChevronRight } from 'lucide-react';
 
-const card = { background:'#12121a', border:'1px solid #1e1e2e', borderRadius:12, padding:20 };
-const inp = { background:'#1a1a2e', border:'1px solid #2d2d44', borderRadius:8, padding:'9px 12px', color:'#e2e8f0', fontSize:13, outline:'none', width:'100%' };
-const PRIORITY_COLORS = { high:'#ef4444', medium:'#f97316', low:'#22c55e' };
-const STATUS_ICONS = { open:<Clock size={14} color="#6b7280"/>, completed:<CheckCircle size={14} color="#22c55e"/>, escalated:<AlertTriangle size={14} color="#ef4444"/> };
+const PRIORITY_COLORS = { high: 'var(--red)', medium: 'var(--amber)', low: 'var(--green)' };
+const STATUS_ICONS = {
+  open: <Clock size={14} color="var(--text-secondary)" />,
+  completed: <CheckCircle size={14} color="var(--green)" />,
+  escalated: <AlertTriangle size={14} color="var(--red)" />,
+};
 
 export default function Tasks() {
   const [tasks, setTasks] = useState([]);
@@ -17,139 +19,223 @@ export default function Tasks() {
   const [extractResult, setExtractResult] = useState(null);
   const [msg, setMsg] = useState('');
 
-  useEffect(() => { load(); }, []);
-  const load = () => taskApi.list({}).then(r => setTasks(r.data.tasks||[])).catch(console.error).finally(()=>setLoading(false));
+  useEffect(() => {
+    load();
+  }, []);
+
+  const load = () =>
+    taskApi
+      .list({})
+      .then((r) => setTasks(r.data.tasks || []))
+      .catch(console.error)
+      .finally(() => setLoading(false));
 
   const runExtract = async () => {
-    if (!transcript.trim()) { setMsg('Paste a meeting transcript first.'); return; }
-    setExtracting(true); setMsg(''); setExtractResult(null);
+    if (!transcript.trim()) {
+      setMsg('Paste a meeting transcript first.');
+      return;
+    }
+    setExtracting(true);
+    setMsg('');
+    setExtractResult(null);
     try {
       const r = await taskApi.extractFromMeeting({ transcript, meeting_title: meetingTitle || 'Finance Meeting', source: 'manual_upload' });
       setExtractResult(r.data);
       setMsg(`Created ${r.data.tasks_created} tasks from meeting transcript.`);
-      setTranscript(''); setMeetingTitle('');
+      setTranscript('');
+      setMeetingTitle('');
       load();
-    } catch(e) {
+    } catch (e) {
       setMsg(e.response?.data?.detail || 'Extraction failed. Check your Gemini API key.');
-    } finally { setExtracting(false); }
+    } finally {
+      setExtracting(false);
+    }
   };
 
   const markDone = async (id) => {
     try {
       await taskApi.update(id, { status: 'completed' });
       load();
-    } catch(e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 22, gap: 16, flexWrap: 'wrap' }}>
         <div>
-          <h1 style={{ fontSize:22, fontWeight:700, color:'#e2e8f0' }}>Tasks</h1>
-          <p style={{ fontSize:13, color:'#6b7280', marginTop:4 }}>Meeting Intelligence Agent — extracts action items automatically</p>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: 'var(--text-primary)' }}>TASKS</h1>
+          <div className="jet-mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8 }}>Meeting intelligence and follow-up actions</div>
         </div>
-        <button onClick={()=>setShowExtract(!showExtract)}
-          style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 16px', background:'#2D1B6E', border:'1px solid #4B3CA7', borderRadius:8, color:'#a78bfa', cursor:'pointer', fontSize:13, fontWeight:600 }}>
-          <Brain size={14}/> Extract from Meeting
+        <button
+          onClick={() => setShowExtract(!showExtract)}
+          className="pill"
+          style={{
+            border: '1px solid rgba(0,212,255,0.22)',
+            background: 'rgba(0,212,255,0.08)',
+            color: 'var(--cyan)',
+            cursor: 'pointer',
+            height: 38,
+          }}
+        >
+          <Brain size={14} /> EXTRACT FROM MEETING
         </button>
       </div>
 
-      {/* Meeting extraction panel */}
       {showExtract && (
-        <div style={{ ...card, marginBottom:20, borderColor:'#4B3CA7' }}>
-          <h3 style={{ fontSize:14, fontWeight:600, color:'#e2e8f0', marginBottom:4, display:'flex', alignItems:'center', gap:8 }}>
-            <Brain size={15} color="#a78bfa"/> Meeting Intelligence Agent
+        <div className="panel" style={{ padding: 20, marginBottom: 20, borderLeft: '3px solid var(--violet)' }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Brain size={15} color="var(--cyan)" /> MEETING INTELLIGENCE AGENT
           </h3>
-          <p style={{ fontSize:12, color:'#6b7280', marginBottom:14 }}>
-            Paste a finance/procurement meeting transcript. Gemini AI will extract decisions, assign tasks, and set priorities automatically.
+          <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14 }}>
+            Paste a finance or procurement meeting transcript. Gemini AI will extract decisions, assign tasks, and set priorities automatically.
           </p>
-          <input style={{ ...inp, marginBottom:10 }} placeholder="Meeting title (optional)" value={meetingTitle} onChange={e=>setMeetingTitle(e.target.value)}/>
+          <input
+            value={meetingTitle}
+            onChange={(e) => setMeetingTitle(e.target.value)}
+            placeholder="Meeting title (optional)"
+            style={{ width: '100%', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', color: 'var(--text-primary)', fontSize: 13, outline: 'none', marginBottom: 10 }}
+          />
           <textarea
-            style={{ ...inp, minHeight:160, resize:'vertical', marginBottom:12, fontFamily:'monospace', fontSize:12 }}
+            style={{ width: '100%', minHeight: 170, resize: 'vertical', marginBottom: 12, fontFamily: 'JetBrains Mono, monospace', fontSize: 12, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', color: 'var(--text-primary)', outline: 'none' }}
             placeholder={`Paste meeting transcript here...\n\nExample:\nJohn: We need to review all invoices above $50,000 before payment.\nSarah: I'll create a checklist for the finance team by Friday.\nJohn: Also, please audit TechSupplies invoices from last quarter.\nMaria: I'll handle that audit by end of next week.`}
             value={transcript}
-            onChange={e=>setTranscript(e.target.value)}
+            onChange={(e) => setTranscript(e.target.value)}
           />
           {msg && (
-            <div style={{ padding:'10px 14px', background: msg.includes('failed')||msg.includes('error') ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
-              border:`1px solid ${msg.includes('failed')||msg.includes('error') ? '#ef4444':'#22c55e'}`, borderRadius:8, fontSize:13,
-              color: msg.includes('failed')||msg.includes('error') ? '#fca5a5':'#86efac', marginBottom:12 }}>
-              {msg}
+            <div
+              className="panel"
+              style={{
+                padding: '10px 14px',
+                background: msg.includes('failed') || msg.includes('error') ? 'rgba(255,58,92,0.08)' : 'rgba(0,232,135,0.08)',
+                borderColor: msg.includes('failed') || msg.includes('error') ? 'rgba(255,58,92,0.2)' : 'rgba(0,232,135,0.2)',
+                marginBottom: 12,
+              }}
+            >
+              <div style={{ fontSize: 13, color: msg.includes('failed') || msg.includes('error') ? 'var(--red)' : 'var(--green)' }}>{msg}</div>
             </div>
           )}
           {extractResult && (
-            <div style={{ marginBottom:14 }}>
+            <div style={{ marginBottom: 14 }}>
               {extractResult.summary && (
-                <div style={{ padding:'10px 14px', background:'rgba(75,60,167,0.1)', border:'1px solid rgba(75,60,167,0.3)', borderRadius:8, fontSize:13, color:'#a78bfa', marginBottom:10 }}>
-                  <strong>Summary:</strong> {extractResult.summary}
+                <div className="panel" style={{ padding: '10px 14px', background: 'rgba(0,212,255,0.05)', marginBottom: 10 }}>
+                  <strong style={{ color: 'var(--cyan)' }}>Summary:</strong> {extractResult.summary}
                 </div>
               )}
-              {(extractResult.decisions||[]).length > 0 && (
-                <div style={{ marginBottom:10 }}>
-                  <p style={{ fontSize:12, color:'#9ca3af', marginBottom:6, fontWeight:600 }}>DECISIONS MADE</p>
-                  {extractResult.decisions.map((d,i) => (
-                    <div key={i} style={{ fontSize:12, color:'#d1d5db', padding:'6px 10px', background:'#1a1a2e', borderRadius:6, marginBottom:4 }}>• {d.decision}</div>
+              {(extractResult.decisions || []).length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <p className="jet-mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 700 }}>
+                    DECISIONS MADE
+                  </p>
+                  {extractResult.decisions.map((d, i) => (
+                    <div key={i} className="panel" style={{ padding: '7px 10px', marginBottom: 6, fontSize: 12, color: 'var(--text-primary)' }}>
+                      {d.decision}
+                    </div>
                   ))}
                 </div>
               )}
             </div>
           )}
-          <div style={{ display:'flex', gap:10 }}>
-            <button onClick={runExtract} disabled={extracting}
-              style={{ padding:'9px 20px', background:'linear-gradient(135deg,#4B3CA7,#6D5ED4)', border:'none', borderRadius:8, color:'#fff', cursor:extracting?'not-allowed':'pointer', fontSize:13, fontWeight:600, opacity:extracting?0.7:1 }}>
-              {extracting ? 'Extracting with Gemini...' : 'Extract Action Items'}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={runExtract}
+              disabled={extracting}
+              style={{
+                padding: '10px 18px',
+                background: 'linear-gradient(135deg, var(--violet-dim), var(--violet))',
+                border: '1px solid var(--violet)',
+                borderRadius: 10,
+                color: '#fff',
+                cursor: extracting ? 'not-allowed' : 'pointer',
+                fontSize: 13,
+                fontWeight: 700,
+                opacity: extracting ? 0.7 : 1,
+              }}
+            >
+              {extracting ? 'EXTRACTING WITH GEMINI...' : 'EXTRACT ACTION ITEMS'}
             </button>
-            <button onClick={()=>setShowExtract(false)}
-              style={{ padding:'9px 16px', background:'transparent', border:'1px solid #2d2d44', borderRadius:8, color:'#9ca3af', cursor:'pointer', fontSize:13 }}>
+            <button
+              onClick={() => setShowExtract(false)}
+              style={{
+                padding: '10px 16px',
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 10,
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                fontSize: 13,
+              }}
+            >
               Close
             </button>
           </div>
         </div>
       )}
 
-      {/* Tasks list */}
-      <div style={card}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-          <h3 style={{ fontSize:14, fontWeight:600, color:'#e2e8f0' }}>All Tasks ({tasks.length})</h3>
-          <div style={{ display:'flex', gap:6 }}>
-            {['open','completed'].map(s => (
-              <button key={s} onClick={() => taskApi.list({status:s}).then(r=>setTasks(r.data.tasks||[]))}
-                style={{ padding:'4px 12px', borderRadius:6, border:'1px solid #2d2d44', background:'#1a1a2e', color:'#9ca3af', cursor:'pointer', fontSize:11 }}>
-                {s}
+      <div className="panel" style={{ padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>ALL TASKS ({tasks.length})</h3>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {['open', 'completed'].map((status) => (
+              <button
+                key={status}
+                onClick={() => taskApi.list({ status }).then((r) => setTasks(r.data.tasks || []))}
+                className="pill"
+                style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)', cursor: 'pointer', height: 30 }}
+              >
+                {status}
               </button>
             ))}
           </div>
         </div>
+
         {loading ? (
-          <div style={{ textAlign:'center', padding:40, color:'#6b7280', fontSize:13 }}>Loading tasks...</div>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-dim)', fontSize: 13 }}>Loading tasks...</div>
         ) : tasks.length === 0 ? (
-          <div style={{ textAlign:'center', padding:40, color:'#4b5563', fontSize:13 }}>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-dim)', fontSize: 13 }}>
             No tasks yet. Use the Meeting Intelligence Agent above to extract action items from a meeting transcript.
           </div>
         ) : (
-          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            {tasks.map(t => (
-              <div key={t.task_id} style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', padding:'14px 16px', background:'#1a1a2e', borderRadius:10, border:`1px solid ${t.status==='completed'?'#14532d':'#2d2d44'}`, gap:12 }}>
-                <div style={{ display:'flex', alignItems:'flex-start', gap:12, flex:1 }}>
-                  <div style={{ marginTop:2 }}>{STATUS_ICONS[t.status] || STATUS_ICONS.open}</div>
-                  <div style={{ flex:1 }}>
-                    <p style={{ fontSize:13, color: t.status==='completed'?'#6b7280':'#e2e8f0', fontWeight:500, textDecoration: t.status==='completed'?'line-through':'none' }}>{t.title}</p>
-                    {t.description && <p style={{ fontSize:12, color:'#6b7280', marginTop:3 }}>{t.description}</p>}
-                    <div style={{ display:'flex', gap:12, marginTop:6, flexWrap:'wrap' }}>
-                      {t.owner_name && <span style={{ fontSize:11, color:'#9ca3af' }}>👤 {t.owner_name}</span>}
-                      {t.due_date && <span style={{ fontSize:11, color:'#9ca3af' }}>📅 {t.due_date?.slice(0,10)}</span>}
-                      {t.source_ref && <span style={{ fontSize:11, color:'#6b7280' }}>📋 {t.source_ref}</span>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {tasks.map((task) => (
+              <div key={task.task_id} className="panel panel-hover" style={{ padding: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flex: 1, minWidth: 0 }}>
+                  <div style={{ marginTop: 2 }}>{STATUS_ICONS[task.status] || STATUS_ICONS.open}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, color: task.status === 'completed' ? 'var(--text-dim)' : 'var(--text-primary)', fontWeight: 600, textDecoration: task.status === 'completed' ? 'line-through' : 'none' }}>
+                      {task.title}
+                    </p>
+                    {task.description && <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>{task.description}</p>}
+                    <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+                      {task.owner_name && <span className="jet-mono" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>OWNER {task.owner_name}</span>}
+                      {task.due_date && <span className="jet-mono" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>DUE {task.due_date?.slice(0, 10)}</span>}
+                      {task.source_ref && <span className="jet-mono" style={{ fontSize: 11, color: 'var(--text-dim)' }}>SOURCE {task.source_ref}</span>}
                     </div>
                   </div>
                 </div>
-                <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
-                  <span style={{ fontSize:10, color: PRIORITY_COLORS[t.priority]||'#6b7280', background:`${PRIORITY_COLORS[t.priority]||'#6b7280'}20`, padding:'2px 8px', borderRadius:20, fontWeight:600, textTransform:'uppercase' }}>
-                    {t.priority}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  <span className="pill" style={{ background: `${PRIORITY_COLORS[task.priority] || 'var(--text-secondary)'}18`, color: PRIORITY_COLORS[task.priority] || 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                    {task.priority}
                   </span>
-                  {t.status === 'open' && (
-                    <button onClick={() => markDone(t.task_id)}
-                      style={{ padding:'5px 12px', background:'rgba(34,197,94,0.15)', border:'1px solid #22c55e', borderRadius:6, color:'#86efac', cursor:'pointer', fontSize:11, fontWeight:600 }}>
-                      Done
+                  {task.status === 'open' && (
+                    <button
+                      onClick={() => markDone(task.task_id)}
+                      style={{
+                        padding: '6px 12px',
+                        background: 'rgba(0,232,135,0.08)',
+                        border: '1px solid var(--green)',
+                        borderRadius: 10,
+                        color: 'var(--green)',
+                        cursor: 'pointer',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      Done <ChevronRight size={12} />
                     </button>
                   )}
                 </div>

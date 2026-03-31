@@ -22,7 +22,9 @@ class ERPOAuthService:
         result = await self.db.execute(
             text(
                 """
-                SELECT provider, enabled, auth_url, token_url, scopes, redirect_uri, updated_at
+                SELECT provider, enabled, auth_url, token_url, scopes, redirect_uri, client_id,
+                       CASE WHEN client_secret IS NOT NULL AND client_secret != '' THEN 1 ELSE 0 END AS has_client_secret,
+                       updated_at
                 FROM erp_integrations
                 ORDER BY provider
                 """

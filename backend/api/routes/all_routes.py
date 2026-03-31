@@ -133,7 +133,7 @@ async def ocr_test(current_user: dict = Depends(get_current_user)):
         image.save(buffer, format="PNG")
         image_data_url = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
-        extracted_text = dp.pytesseract.image_to_string(image)
+        extracted_text = dp._image_to_text(image)
         normalize = lambda value: re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
         extracted_norm = normalize(extracted_text)
         sample_norm = normalize(sample_text)
@@ -337,9 +337,10 @@ async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = 
     user = r.mappings().first()
     if not user or not verify_password(form.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_token({"sub": str(user["user_id"]), "email": user["email"], "role": user["role"]})
+    full_name = user["full_name"] or "GenSafe Admin"
+    token = create_token({"sub": str(user["user_id"]), "email": user["email"], "role": user["role"], "name": full_name})
     return {"access_token": token, "token_type": "bearer",
-            "user": {"email": user["email"], "role": user["role"], "name": user["full_name"]}}
+            "user": {"email": user["email"], "role": user["role"], "name": full_name}}
 
 @auth_router.get("/me")
 async def me(current_user: dict = Depends(get_current_user)):

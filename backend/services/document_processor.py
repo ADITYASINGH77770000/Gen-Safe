@@ -104,7 +104,7 @@ async def _extract_pdf(path: str) -> str:
                 pix = page.get_pixmap(dpi=300)
                 mode = "RGBA" if pix.alpha else "RGB"
                 image = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
-                ocr_pages.append(pytesseract.image_to_string(image))
+                ocr_pages.append(_image_to_text(image))
 
             logger.info("PDF OCR completed", path=path, pages=len(ocr_pages))
             return "\n".join(ocr_pages)
@@ -123,7 +123,7 @@ async def _extract_image(path: str) -> str:
             return "[Image OCR unavailable: install Tesseract OCR and set PATH or TESSERACT_CMD]"
 
         logger.info("Image OCR started", path=path, tesseract_cmd=_TESSERACT_CMD)
-        text = pytesseract.image_to_string(Image.open(path))
+        text = _image_to_text(Image.open(path))
         logger.info("Image OCR completed", path=path, chars=len(text))
         return text
     except ImportError:
@@ -160,19 +160,89 @@ def parse_invoice_fields(text: str) -> dict:
     compact = " ".join(lines)
     fields: dict[str, object] = {}
 
+    supplier_name = _match_first(
+        raw,
+        [
+            r"(?:supplier|vendor|seller|from|company)\s*[:\-]\s*([^\n]{2,80})",
+            r"(?:invoice\s+from)\s*[:\-]?\s*([^\n]{2,80})",
+        ],
+        cleaner=_clean_supplier_name,
+    )
+    if not supplier_name:
+        supplier_name = _infer_supplier_name(lines)
+    if supplier_name:
+        fields["supplier_name"] = supplier_name
+
     invoice_number = _match_first(
         raw,
         [
             r"(?:invoice\s*(?:id|no|number|#)|inv\s*(?:id|no|#)?)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\/._\-]{2,})",
             r"invoice\s*[:\-]?\s*([A-Z0-9][A-Z0-9\/._\-]{2,})",
         ],
+        cleaner=_clean_reference_value,
     )
     if invoice_number:
         fields["invoice_number"] = invoice_number
 
-    supplier_name = _infer_supplier_name(lines)
-    if supplier_name:
-        fields["supplier_name"] = supplier_name
+    invoice_date = _match_first(
+        raw,
+        [
+            r"(?:invoice\s+date|date\s+issued|issued\s+on|date)\s*[:\-]?\s*([0-9]{1,4}[\/\-.][0-9]{1,2}[\/\-.][0-9]{1,4}|[A-Za-z]{3,9}\s+[0-9]{1,2},?\s+[0-9]{2,4})",
+        ],
+        cleaner=_clean_date_value,
+    )
+    if invoice_date:
+        fields["invoice_date"] = invoice_date
+
+    due_date = _match_first(
+        raw,
+        [
+            r"(?:due\s+date|payment\s+due|due)\s*[:\-]?\s*([0-9]{1,4}[\/\-.][0-9]{1,2}[\/\-.][0-9]{1,4}|[A-Za-z]{3,9}\s+[0-9]{1,2},?\s+[0-9]{2,4})",
+        ],
+        cleaner=_clean_date_value,
+    )
+    if due_date:
+        fields["due_date"] = due_date
+
+    po_number = _match_first(
+        raw,
+        [
+            r"(?:purchase\s+order|po)\s*(?:number|no|#)?\s*[:\-]?\s*([A-Z0-9][A-Z0-9\/._\-]{2,})",
+        ],
+        cleaner=_clean_reference_value,
+    )
+    if po_number:
+        fields["po_number"] = po_number
+
+    reference = _match_first(
+        raw,
+        [
+            r"(?:reference|ref)\s*(?:number|no|#)?\s*[:\-]?\s*([A-Z0-9][A-Z0-9\/._\- ]{2,})",
+        ],
+        cleaner=_clean_reference_value,
+    )
+    if reference:
+        fields["reference"] = reference
+
+    payment_terms = _match_first(
+        raw,
+        [
+            r"(?:payment\s+terms|terms)\s*[:\-]?\s*([^\n]{2,80})",
+        ],
+        cleaner=_clean_short_text,
+    )
+    if payment_terms:
+        fields["payment_terms"] = payment_terms
+
+    bill_to = _match_first(
+        raw,
+        [
+            r"(?:bill\s+to)\s*[:\-]?\s*([^\n]{2,120})",
+        ],
+        cleaner=_clean_short_text,
+    )
+    if bill_to:
+        fields["bill_to"] = bill_to
 
     parsed_amount = _match_first(
         raw,
@@ -223,8 +293,23 @@ def parse_invoice_fields(text: str) -> dict:
         if subtotal_val or tax_val or discount_val:
             fields["total_amount"] = round(subtotal_val + tax_val - discount_val, 2)
 
-    coverage = sum(1 for key in ("invoice_number", "supplier_name", "total_amount") if key in fields)
-    fields["confidence"] = round(coverage / 3, 2)
+    coverage_fields = (
+        "supplier_name",
+        "invoice_number",
+        "invoice_date",
+        "due_date",
+        "po_number",
+        "reference",
+        "payment_terms",
+        "bill_to",
+        "subtotal",
+        "tax",
+        "discount",
+        "total_amount",
+        "currency",
+    )
+    coverage = sum(1 for key in coverage_fields if fields.get(key) not in (None, ""))
+    fields["confidence"] = round(min(1.0, coverage / len(coverage_fields)), 2)
     return fields
 
 
@@ -255,9 +340,17 @@ def _infer_supplier_name(lines: list[str]) -> str | None:
         "qty",
         "units",
         "unit price",
+        "payment terms",
+        "reference",
+        "purchase order",
+        "po number",
+        "invoice number",
+        "invoice date",
+        "due date",
+        "remit to",
     }
     for line in lines[:12]:
-        clean = re.sub(r"\s+", " ", line).strip(" :-\t")
+        clean = _clean_supplier_name(line)
         if not clean:
             continue
         lower = clean.lower()
@@ -270,7 +363,7 @@ def _infer_supplier_name(lines: list[str]) -> str | None:
     return None
 
 
-def _match_first(text: str, patterns: list[str], amount: bool = False):
+def _match_first(text: str, patterns: list[str], amount: bool = False, cleaner=None):
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
         if not match:
@@ -295,5 +388,60 @@ def _match_first(text: str, patterns: list[str], amount: bool = False):
         else:
             for group in match.groups():
                 if group:
-                    return group.strip()
+                    value = group.strip()
+                    return cleaner(value) if cleaner else value
     return None
+
+
+def _image_to_text(image) -> str:
+    """Run OCR with light preprocessing and a couple of page-segmentation strategies."""
+    from PIL import ImageFilter, ImageOps
+
+    working = image.convert("L")
+    working = ImageOps.autocontrast(working)
+    if min(working.size) < 1400:
+        working = working.resize((working.width * 2, working.height * 2))
+    working = working.filter(ImageFilter.SHARPEN)
+    thresholded = working.point(lambda px: 255 if px > 170 else 0)
+
+    variants = [
+        (working, "--oem 3 --psm 6"),
+        (thresholded, "--oem 3 --psm 6"),
+        (working, "--oem 3 --psm 11"),
+    ]
+
+    best = ""
+    best_score = -1
+    for variant, config in variants:
+        try:
+            extracted = pytesseract.image_to_string(variant, config=config)
+        except TypeError:
+            extracted = pytesseract.image_to_string(variant)
+        score = len(re.findall(r"[A-Za-z0-9]", extracted or ""))
+        if score > best_score:
+            best = extracted
+            best_score = score
+    return best
+
+
+def _clean_reference_value(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip(" :-\t").rstrip(".,;")
+
+
+def _clean_date_value(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip(" :-\t").rstrip(".,;")
+
+
+def _clean_short_text(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", value).strip(" :-\t")
+    cleaned = re.split(r"\s{2,}", cleaned)[0]
+    return cleaned.rstrip(".,;")
+
+
+def _clean_supplier_name(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", value).strip(" :-\t")
+    cleaned = re.sub(r"^(supplier|vendor|seller|company|invoice from)\s*[:\-]\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.rstrip(".,;")
+    if len(cleaned) > 80:
+        cleaned = cleaned[:80].rstrip()
+    return cleaned

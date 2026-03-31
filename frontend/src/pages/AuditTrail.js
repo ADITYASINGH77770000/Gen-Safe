@@ -1,24 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { auditApi } from '../services/api';
-import { BookOpen, Shield, Brain, Activity, Search } from 'lucide-react';
-
-const card = { background:'#12121a', border:'1px solid #1e1e2e', borderRadius:12, padding:20 };
-const inp = { background:'#1a1a2e', border:'1px solid #2d2d44', borderRadius:8, padding:'8px 12px', color:'#e2e8f0', fontSize:13, outline:'none' };
+import { BookOpen, Shield, Brain, Activity, Search, ChevronDown, ChevronUp } from 'lucide-react';
 
 const AGENT_COLORS = {
-  orchestrator: '#a78bfa',
-  llm_analysis_agent: '#38bdf8',
-  anomaly_detection_agent: '#fb923c',
-  risk_aggregator: '#f472b6',
-  verification_audit_agent: '#34d399',
-  mock_analysis: '#6b7280',
+  orchestrator: 'var(--violet)',
+  llm_analysis_agent: 'var(--cyan)',
+  anomaly_detection_agent: 'var(--amber)',
+  risk_aggregator: 'var(--red)',
+  verification_audit_agent: 'var(--green)',
+  mock_analysis: 'var(--text-secondary)',
 };
 
-const AGENT_ICONS = {
-  orchestrator: Shield,
-  llm_analysis_agent: Brain,
-  anomaly_detection_agent: Activity,
-};
+function agentColor(id) {
+  return AGENT_COLORS[id] || 'var(--text-secondary)';
+}
+
+function prettyJson(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value, null, 2);
+}
 
 export default function AuditTrail() {
   const [records, setRecords] = useState([]);
@@ -29,113 +30,161 @@ export default function AuditTrail() {
 
   useEffect(() => {
     load();
-    auditApi.stats().then(r => setStats(r.data.agent_stats||[])).catch(console.error);
+    auditApi.stats().then((r) => setStats(r.data.agent_stats || [])).catch(console.error);
   }, []);
 
-  const load = (invoice_id='') => {
+  const load = (invoice_id = '') => {
     setLoading(true);
-    auditApi.trail({ invoice_id: invoice_id||undefined, limit:100 })
-      .then(r => setRecords(r.data.audit_records||[]))
+    auditApi
+      .trail({ invoice_id: invoice_id || undefined, limit: 100 })
+      .then((r) => setRecords(r.data.audit_records || []))
       .catch(console.error)
       .finally(() => setLoading(false));
   };
 
   const search = () => load(invoiceFilter.trim());
 
-  const agentColor = (id) => AGENT_COLORS[id] || '#6b7280';
-
   return (
     <div>
-      <div style={{ marginBottom:24 }}>
-        <h1 style={{ fontSize:22, fontWeight:700, color:'#e2e8f0', display:'flex', alignItems:'center', gap:10 }}>
-          <BookOpen size={20} color="#a78bfa"/> Audit Trail
-        </h1>
-        <p style={{ fontSize:13, color:'#6b7280', marginTop:4 }}>Immutable record of every agent decision — append-only, never modified</p>
+      <div style={{ marginBottom: 22, display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: 'var(--text-primary)' }}>AUDIT TRAIL</h1>
+          <div className="jet-mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8 }}>
+            Immutable record of every agent decision - append-only, never modified
+          </div>
+        </div>
+        <div className="pill" style={{ background: 'rgba(0,232,135,0.08)', color: 'var(--green)', border: '1px solid rgba(0,232,135,0.18)' }}>
+          <Shield size={12} /> APPEND-ONLY
+        </div>
       </div>
 
-      {/* Agent stats */}
       {stats.length > 0 && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:12, marginBottom:20 }}>
-          {stats.map(s => (
-            <div key={s.agent_id} style={{ ...card, padding:14 }}>
-              <p style={{ fontSize:11, color:agentColor(s.agent_id), fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>{s.agent_id?.replace(/_/g,' ')}</p>
-              <p style={{ fontSize:22, fontWeight:700, color:'#e2e8f0' }}>{s.actions}</p>
-              <p style={{ fontSize:11, color:'#6b7280' }}>actions · avg {Math.round(s.avg_ms||0)}ms</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 12, marginBottom: 20 }}>
+          {stats.map((stat) => (
+            <div key={stat.agent_id} className="panel panel-hover" style={{ padding: 16 }}>
+              <div className="jet-mono" style={{ fontSize: 10, color: agentColor(stat.agent_id), fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6 }}>
+                {stat.agent_id?.replace(/_/g, ' ')}
+              </div>
+              <div className="jet-mono" style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)' }}>{stat.actions}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>actions - avg {Math.round(stat.avg_ms || 0)}ms</div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Filter */}
-      <div style={{ display:'flex', gap:10, marginBottom:16 }}>
-        <input style={{ ...inp, flex:1 }} placeholder="Filter by invoice ID..." value={invoiceFilter} onChange={e=>setInvoiceFilter(e.target.value)}
-          onKeyDown={e => e.key==='Enter' && search()} />
-        <button onClick={search}
-          style={{ padding:'8px 16px', background:'#2D1B6E', border:'1px solid #4B3CA7', borderRadius:8, color:'#a78bfa', cursor:'pointer', fontSize:13, display:'flex', alignItems:'center', gap:6 }}>
-          <Search size={13}/> Search
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <input
+          style={{
+            flex: 1,
+            minWidth: 260,
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            borderRadius: 10,
+            padding: '10px 12px',
+            color: 'var(--text-primary)',
+            fontSize: 13,
+            outline: 'none',
+          }}
+          placeholder="Filter by invoice ID..."
+          value={invoiceFilter}
+          onChange={(e) => setInvoiceFilter(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && search()}
+        />
+        <button
+          onClick={search}
+          className="pill"
+          style={{
+            background: 'rgba(0,212,255,0.08)',
+            color: 'var(--cyan)',
+            border: '1px solid rgba(0,212,255,0.2)',
+            cursor: 'pointer',
+            height: 40,
+          }}
+        >
+          <Search size={13} /> SEARCH
         </button>
-        <button onClick={() => { setInvoiceFilter(''); load(''); }}
-          style={{ padding:'8px 14px', background:'transparent', border:'1px solid #2d2d44', borderRadius:8, color:'#6b7280', cursor:'pointer', fontSize:13 }}>
+        <button
+          onClick={() => {
+            setInvoiceFilter('');
+            load('');
+          }}
+          className="pill"
+          style={{
+            background: 'var(--bg-surface)',
+            color: 'var(--text-secondary)',
+            border: '1px solid var(--border)',
+            cursor: 'pointer',
+            height: 40,
+          }}
+        >
           Clear
         </button>
       </div>
 
-      {/* Records */}
-      <div style={card}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-          <h3 style={{ fontSize:14, fontWeight:600, color:'#e2e8f0' }}>Decision Records ({records.length})</h3>
-          <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, color:'#6b7280' }}>
-            <Shield size={12} color="#22c55e"/> Append-only · Tamper-proof
+      <div className="panel" style={{ padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>DECISION RECORDS ({records.length})</h3>
+          <div className="jet-mono" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-secondary)' }}>
+            <Shield size={12} color="var(--green)" /> Appended records - tamper checked
           </div>
         </div>
 
         {loading ? (
-          <div style={{ textAlign:'center', padding:40, color:'#6b7280', fontSize:13 }}>Loading audit records...</div>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-dim)', fontSize: 13 }}>Loading audit records...</div>
         ) : records.length === 0 ? (
-          <div style={{ textAlign:'center', padding:40, color:'#4b5563', fontSize:13 }}>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-dim)', fontSize: 13 }}>
             No audit records yet. Submit an invoice to generate agent decision records.
           </div>
         ) : (
-          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-            {records.map(r => {
-              const isExp = expanded === r.id;
-              const color = agentColor(r.agent_id);
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {records.map((record) => {
+              const isExp = expanded === record.id;
+              const color = agentColor(record.agent_id);
               return (
-                <div key={r.id} style={{ borderRadius:8, border:`1px solid ${isExp?color+'60':'#2d2d44'}`, overflow:'hidden' }}>
-                  <div onClick={() => setExpanded(isExp?null:r.id)}
-                    style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px', cursor:'pointer', background: isExp?'#1a1a2e':'transparent' }}>
-                    <div style={{ width:8, height:8, borderRadius:'50%', background:color, flexShrink:0 }}/>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-                        <span style={{ fontSize:12, color, fontWeight:600 }}>{r.agent_id?.replace(/_/g,' ')}</span>
-                        <span style={{ fontSize:12, color:'#e2e8f0' }}>{r.action?.replace(/_/g,' ')}</span>
-                        {r.status === 'failed' && <span style={{ fontSize:10, color:'#fca5a5', background:'rgba(239,68,68,0.15)', padding:'1px 6px', borderRadius:10 }}>FAILED</span>}
+                <div key={record.id} className="panel" style={{ overflow: 'hidden', borderLeft: `3px solid ${color}` }}>
+                  <div
+                    onClick={() => setExpanded(isExp ? null : record.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '12px 14px',
+                      cursor: 'pointer',
+                      background: isExp ? 'rgba(0,212,255,0.04)' : 'transparent',
+                    }}
+                  >
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <span className="jet-mono" style={{ fontSize: 12, color: color, fontWeight: 700 }}>{record.agent_id?.replace(/_/g, ' ')}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>{record.action?.replace(/_/g, ' ')}</span>
+                        {record.status === 'failed' && <span className="pill" style={{ background: 'rgba(255,58,92,0.1)', color: 'var(--red)', border: '1px solid rgba(255,58,92,0.2)' }}>FAILED</span>}
                       </div>
-                      <div style={{ display:'flex', gap:12, marginTop:3, flexWrap:'wrap' }}>
-                        <span style={{ fontSize:10, color:'#4b5563', fontFamily:'monospace' }}>trace:{r.trace_id?.slice(0,8)}</span>
-                        <span style={{ fontSize:10, color:'#4b5563' }}>{r.created_at?.slice(0,19)?.replace('T',' ')}</span>
-                        {r.duration_ms && <span style={{ fontSize:10, color:'#4b5563' }}>{r.duration_ms}ms</span>}
+                      <div style={{ display: 'flex', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
+                        <span className="jet-mono" style={{ fontSize: 10, color: 'var(--text-dim)' }}>trace:{record.trace_id?.slice(0, 8)}</span>
+                        <span className="jet-mono" style={{ fontSize: 10, color: 'var(--text-dim)' }}>{record.created_at?.slice(0, 19)?.replace('T', ' ')}</span>
+                        {record.duration_ms && <span className="jet-mono" style={{ fontSize: 10, color: 'var(--text-dim)' }}>{record.duration_ms}ms</span>}
                       </div>
                     </div>
-                    <span style={{ fontSize:11, color:'#4b5563' }}>{isExp?'▲':'▼'}</span>
+                    {isExp ? <ChevronUp size={14} color="var(--text-secondary)" /> : <ChevronDown size={14} color="var(--text-secondary)" />}
                   </div>
 
                   {isExp && (
-                    <div style={{ padding:'12px 14px', background:'#0f0f13', borderTop:'1px solid #1e1e2e' }}>
-                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                    <div style={{ padding: '12px 14px', background: 'var(--bg-deep)', borderTop: '1px solid var(--border)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                         <div>
-                          <p style={{ fontSize:11, color:'#6b7280', marginBottom:6, fontWeight:600 }}>INPUT HASH</p>
-                          <code style={{ fontSize:11, color:'#9ca3af' }}>{r.input_hash}</code>
+                          <p className="jet-mono" style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 700 }}>INPUT HASH</p>
+                          <code className="jet-mono" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{record.input_hash}</code>
                         </div>
                         <div>
-                          <p style={{ fontSize:11, color:'#6b7280', marginBottom:6, fontWeight:600 }}>OUTPUT HASH</p>
-                          <code style={{ fontSize:11, color:'#9ca3af' }}>{r.output_hash}</code>
+                          <p className="jet-mono" style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 700 }}>OUTPUT HASH</p>
+                          <code className="jet-mono" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{record.output_hash}</code>
                         </div>
-                        {r.output_data && (
-                          <div style={{ gridColumn:'1/-1' }}>
-                            <p style={{ fontSize:11, color:'#6b7280', marginBottom:6, fontWeight:600 }}>OUTPUT DATA</p>
-                            <pre style={{ fontSize:11, color:'#a78bfa', background:'#12121a', padding:'10px 12px', borderRadius:6, overflow:'auto', maxHeight:200, border:'1px solid #1e1e2e' }}>
-                              {JSON.stringify(typeof r.output_data==='string'?JSON.parse(r.output_data):r.output_data, null, 2)}
+                        {record.output_data && (
+                          <div style={{ gridColumn: '1/-1' }}>
+                            <p className="jet-mono" style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 700 }}>OUTPUT DATA</p>
+                            <pre style={{ fontSize: 11, color: 'var(--text-primary)', background: 'var(--bg-surface)', padding: '10px 12px', borderRadius: 10, overflow: 'auto', maxHeight: 220, border: '1px solid var(--border)' }}>
+                              {prettyJson(typeof record.output_data === 'string' ? JSON.parse(record.output_data) : record.output_data)}
                             </pre>
                           </div>
                         )}
